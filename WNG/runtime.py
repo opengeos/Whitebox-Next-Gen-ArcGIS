@@ -30,7 +30,12 @@ def _candidate_pythons() -> list[str]:
         p = str(Path(path).expanduser())
         if p in seen:
             return
-        if os.path.isfile(p) and os.access(p, os.X_OK):
+        name = Path(p).name.lower()
+        is_python = (
+            name.startswith("python")
+            or name in {"propy", "propy.bat", "propy.exe"}
+        )
+        if os.path.isfile(p) and os.access(p, os.X_OK) and is_python:
             seen.add(p)
             out.append(p)
 

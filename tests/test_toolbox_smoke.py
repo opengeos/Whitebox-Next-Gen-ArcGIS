@@ -49,6 +49,22 @@ def test_install_required_packages_defaults(monkeypatch):
     assert params[3].value is False
 
 
+def test_runtime_python_candidates_skip_arcgispro_exe(monkeypatch, tmp_path):
+    runtime = importlib.import_module("WNG.runtime")
+    arcgispro = tmp_path / "ArcGISPro.exe"
+    python = tmp_path / "python.exe"
+    arcgispro.write_text("")
+    python.write_text("")
+    arcgispro.chmod(0o755)
+    python.chmod(0o755)
+    monkeypatch.setenv("WBW_EXTERNAL_PYTHON", str(arcgispro))
+    monkeypatch.setenv("WBW_PYTHON", str(python))
+    monkeypatch.setattr(runtime.sys, "executable", str(arcgispro))
+    candidates = runtime.candidate_python_executables()
+    assert str(arcgispro) not in candidates
+    assert candidates[0] == str(python)
+
+
 def test_representative_tool_has_parameters(monkeypatch):
     toolbox = importlib.import_module("WNG.toolbox")
     monkeypatch.setattr(toolbox, "arcpy", _Arcpy())

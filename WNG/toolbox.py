@@ -73,7 +73,7 @@ def _text_value(parameter, default: str = "") -> str:
 
 def _default_python_executable() -> str:
     candidates = candidate_python_executables()
-    return candidates[0] if candidates else sys.executable
+    return candidates[0] if candidates else ""
 
 
 class _StreamToArcGIS:
@@ -160,7 +160,6 @@ class InstallRequiredPackages(object):
             parameterType="Optional",
             direction="Input",
         )
-        python.value = _default_python_executable()
 
         packages = arcpy.Parameter(
             displayName="Package spec",
@@ -205,6 +204,11 @@ class InstallRequiredPackages(object):
         package_spec = _text_value(parameters[1]).strip()
         if not package_spec:
             raise RuntimeError("Package spec is required.")
+        if not python:
+            raise RuntimeError(
+                "Python executable is required. Select python.exe from an ArcGIS Pro "
+                "Python environment or set WBW_EXTERNAL_PYTHON."
+            )
         if not os.path.isfile(python):
             raise RuntimeError(f"Python executable does not exist: {python}")
 
