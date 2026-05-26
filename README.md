@@ -24,6 +24,11 @@ Useful environment variables:
 
 Use the `Runtime Diagnostics` tool first to confirm the active runtime.
 
+You can also run the `Install Required Packages` tool from the toolbox to install
+`whitebox-workflows` into the selected Python executable. If ArcGIS Pro's
+default environment is not writable, clone the environment or point the tool at
+the Python executable set in `WBW_EXTERNAL_PYTHON`.
+
 ## Development
 
 Regenerate the catalog snapshot from the local Next Gen checkout:
