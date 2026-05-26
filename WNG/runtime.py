@@ -42,6 +42,10 @@ def _candidate_pythons() -> list[str]:
     return out
 
 
+def candidate_python_executables() -> list[str]:
+    return list(_candidate_pythons())
+
+
 class ExternalRuntimeSession:
     def __init__(self, python_executable: str, include_pro: bool, tier: str):
         self.python_executable = python_executable

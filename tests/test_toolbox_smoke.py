@@ -31,6 +31,22 @@ def test_toolbox_loads_with_arcpy_stub(monkeypatch):
     tb = toolbox.Toolbox()
     assert tb.alias == "WNG"
     assert len(tb.tools) > 10
+    assert toolbox.InstallRequiredPackages in tb.tools
+
+
+def test_install_required_packages_defaults(monkeypatch):
+    toolbox = importlib.import_module("WNG.toolbox")
+    monkeypatch.setattr(toolbox, "arcpy", _Arcpy())
+    params = toolbox.InstallRequiredPackages().getParameterInfo()
+    assert [p.name for p in params] == [
+        "python_executable",
+        "package_spec",
+        "upgrade",
+        "user_site",
+    ]
+    assert params[1].value == "whitebox-workflows"
+    assert params[2].value is False
+    assert params[3].value is False
 
 
 def test_representative_tool_has_parameters(monkeypatch):

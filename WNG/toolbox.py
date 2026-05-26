@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
+import subprocess
 import sys
 import webbrowser
 from typing import Any
@@ -15,7 +17,11 @@ except Exception:  # pragma: no cover - allows local smoke tests without ArcGIS
 from . import __version__
 from .catalog import default_catalog, humanize_tool_id
 from .parameters import create_parameter, parameter_value
-from .runtime import RuntimeBootstrapError, create_runtime_session
+from .runtime import (
+    RuntimeBootstrapError,
+    candidate_python_executables,
+    create_runtime_session,
+)
 
 
 def _tool_class_name(tool_id: str) -> str:
@@ -42,6 +48,32 @@ def _messages_add(messages, text: str) -> None:
         messages.addMessage(text)
     elif arcpy is not None:
         arcpy.AddMessage(text)
+
+
+def _bool_value(parameter, default: bool = False) -> bool:
+    value = getattr(parameter, "value", None)
+    text = getattr(parameter, "valueAsText", None)
+    if isinstance(value, bool):
+        return value
+    if text in {None, ""}:
+        text = value
+    if text in {None, ""}:
+        return default
+    return str(text).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _text_value(parameter, default: str = "") -> str:
+    text = getattr(parameter, "valueAsText", None)
+    if text in {None, ""}:
+        text = getattr(parameter, "value", None)
+    if text in {None, ""}:
+        return default
+    return str(text)
+
+
+def _default_python_executable() -> str:
+    candidates = candidate_python_executables()
+    return candidates[0] if candidates else sys.executable
 
 
 class _StreamToArcGIS:
@@ -113,6 +145,118 @@ class RuntimeDiagnostics(object):
         except Exception as exc:
             _messages_add(messages, f"Runtime: unavailable ({exc})")
             _messages_add(messages, f"Snapshot catalog tools: {len(default_catalog())}")
+
+
+class InstallRequiredPackages(object):
+    label = "Install Required Packages"
+    description = "Installs Python packages required by the Whitebox Next Gen toolbox."
+    category = "Whitebox Next Gen"
+
+    def getParameterInfo(self):
+        python = arcpy.Parameter(
+            displayName="Python executable",
+            name="python_executable",
+            datatype="GPString",
+            parameterType="Optional",
+            direction="Input",
+        )
+        python.value = _default_python_executable()
+
+        packages = arcpy.Parameter(
+            displayName="Package spec",
+            name="package_spec",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input",
+        )
+        packages.value = "whitebox-workflows"
+
+        upgrade = arcpy.Parameter(
+            displayName="Upgrade if already installed",
+            name="upgrade",
+            datatype="GPBoolean",
+            parameterType="Optional",
+            direction="Input",
+        )
+        upgrade.value = False
+
+        user_site = arcpy.Parameter(
+            displayName="Install to user site",
+            name="user_site",
+            datatype="GPBoolean",
+            parameterType="Optional",
+            direction="Input",
+        )
+        user_site.value = False
+
+        return [python, packages, upgrade, user_site]
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):
+        return
+
+    def updateMessages(self, parameters):
+        return
+
+    def execute(self, parameters, messages):
+        python = _text_value(parameters[0], _default_python_executable()).strip()
+        package_spec = _text_value(parameters[1]).strip()
+        if not package_spec:
+            raise RuntimeError("Package spec is required.")
+        if not os.path.isfile(python):
+            raise RuntimeError(f"Python executable does not exist: {python}")
+
+        try:
+            packages = shlex.split(package_spec)
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid package spec: {exc}") from exc
+        if not packages:
+            raise RuntimeError("Package spec is required.")
+
+        command = [python, "-m", "pip", "install"]
+        if _bool_value(parameters[2], False):
+            command.append("--upgrade")
+        if _bool_value(parameters[3], False):
+            command.append("--user")
+        command.extend(packages)
+
+        env = dict(os.environ)
+        env.pop("PYTHONHOME", None)
+        _messages_add(messages, "Installing with:")
+        _messages_add(messages, " ".join(shlex.quote(part) for part in command))
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env,
+            bufsize=1,
+        )
+        assert process.stdout is not None
+        for line in process.stdout:
+            line = line.rstrip()
+            if line:
+                _messages_add(messages, line)
+        rc = process.wait()
+        if rc != 0:
+            raise RuntimeError(f"Package installation failed with exit code {rc}.")
+
+        verify = subprocess.run(
+            [python, "-c", "import whitebox_workflows as wbw; print(wbw.__name__)"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        if verify.returncode != 0:
+            detail = verify.stderr.strip() or verify.stdout.strip()
+            raise RuntimeError(
+                "Installation completed, but whitebox_workflows could not be imported. "
+                + detail
+            )
+        _messages_add(messages, "Verified import: whitebox_workflows")
 
 
 class SearchTools(object):
@@ -336,7 +480,13 @@ class _CatalogTool(object):
 
 
 def _build_tools():
-    tools = [RuntimeDiagnostics, SearchTools, ToolHelp, RunToolJson]
+    tools = [
+        RuntimeDiagnostics,
+        InstallRequiredPackages,
+        SearchTools,
+        ToolHelp,
+        RunToolJson,
+    ]
     seen: set[str] = set()
     for manifest in default_catalog():
         tool_id = str(manifest.get("id", "")).strip()
