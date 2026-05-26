@@ -19,7 +19,6 @@ from .catalog import default_catalog, humanize_tool_id
 from .parameters import create_parameter, parameter_value
 from .runtime import (
     RuntimeBootstrapError,
-    candidate_python_executables,
     create_runtime_session,
 )
 
@@ -69,11 +68,6 @@ def _text_value(parameter, default: str = "") -> str:
     if text in {None, ""}:
         return default
     return str(text)
-
-
-def _default_python_executable() -> str:
-    candidates = candidate_python_executables()
-    return candidates[0] if candidates else ""
 
 
 class _StreamToArcGIS:
@@ -157,7 +151,7 @@ class InstallRequiredPackages(object):
             displayName="Python executable",
             name="python_executable",
             datatype="GPString",
-            parameterType="Optional",
+            parameterType="Required",
             direction="Input",
         )
 
@@ -200,14 +194,14 @@ class InstallRequiredPackages(object):
         return
 
     def execute(self, parameters, messages):
-        python = _text_value(parameters[0], _default_python_executable()).strip()
+        python = _text_value(parameters[0]).strip()
         package_spec = _text_value(parameters[1]).strip()
         if not package_spec:
             raise RuntimeError("Package spec is required.")
         if not python:
             raise RuntimeError(
-                "Python executable is required. Select python.exe from an ArcGIS Pro "
-                "Python environment or set WBW_EXTERNAL_PYTHON."
+                "Python executable is required. Select python.exe from an "
+                "ArcGIS Pro Python environment."
             )
         if not os.path.isfile(python):
             raise RuntimeError(f"Python executable does not exist: {python}")
