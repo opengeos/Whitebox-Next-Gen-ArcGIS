@@ -1,19 +1,54 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import ast
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-NEXT_GEN = Path("/home/qiusheng/Documents/Fork/whitebox_next_gen")
-WBW_PYTHON = NEXT_GEN / "crates" / "wbw_python"
-STUB = WBW_PYTHON / "whitebox_workflows" / "whitebox_workflows.pyi"
-TAXONOMY = WBW_PYTHON / "tool_taxonomy.resolved.json"
-OUT = ROOT / "WNG" / "data" / "catalog_snapshot.json"
+DEFAULT_OUT = ROOT / "WNG" / "data" / "catalog_snapshot.json"
+
+
+def _resolve_next_gen(arg: str | None) -> Path:
+    """Locate the whitebox_next_gen checkout from CLI arg, env, or sibling dir.
+
+    Resolution order:
+        1. ``--next-gen`` CLI argument
+        2. ``WBW_NEXT_GEN`` environment variable
+        3. ``../whitebox_next_gen`` next to this repository
+
+    Args:
+        arg: Optional path provided on the command line.
+
+    Returns:
+        Absolute :class:`Path` to the Next Gen checkout.
+
+    Raises:
+        SystemExit: If no candidate path exists on disk.
+    """
+
+    candidates: list[Path] = []
+    if arg:
+        candidates.append(Path(arg).expanduser())
+    env = os.environ.get("WBW_NEXT_GEN")
+    if env:
+        candidates.append(Path(env).expanduser())
+    candidates.append(ROOT.parent / "whitebox_next_gen")
+
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate.resolve()
+
+    tried = "\n  ".join(str(c) for c in candidates)
+    raise SystemExit(
+        "Could not locate the whitebox_next_gen checkout. Tried:\n  " + tried +
+        "\nPass --next-gen <path> or set WBW_NEXT_GEN."
+    )
 
 
 CATEGORY_DISPLAY = {
@@ -283,8 +318,29 @@ def signatures(stub_text: str) -> dict[str, dict[str, Any]]:
 
 
 def main() -> None:
-    taxonomy = json.loads(TAXONOMY.read_text(encoding="utf-8"))
-    sigs = signatures(STUB.read_text(encoding="utf-8"))
+    """Generate the catalog snapshot JSON from a local Next Gen checkout."""
+
+    parser = argparse.ArgumentParser(description=main.__doc__)
+    parser.add_argument(
+        "--next-gen",
+        help="Path to the whitebox_next_gen checkout (overrides WBW_NEXT_GEN).",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=DEFAULT_OUT,
+        help=f"Output JSON path (default: {DEFAULT_OUT}).",
+    )
+    args = parser.parse_args()
+
+    next_gen = _resolve_next_gen(args.next_gen)
+    wbw_python = next_gen / "crates" / "wbw_python"
+    stub = wbw_python / "whitebox_workflows" / "whitebox_workflows.pyi"
+    taxonomy_path = wbw_python / "tool_taxonomy.resolved.json"
+    out_path = args.out
+
+    taxonomy = json.loads(taxonomy_path.read_text(encoding="utf-8"))
+    sigs = signatures(stub.read_text(encoding="utf-8"))
 
     index: dict[str, tuple[str, str]] = {}
     ordered_tools: list[str] = []
@@ -360,15 +416,15 @@ def main() -> None:
             }
         )
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
         json.dumps(
-            {"source": str(NEXT_GEN), "tool_count": len(tools), "tools": tools},
+            {"source": str(next_gen), "tool_count": len(tools), "tools": tools},
             indent=2,
         ),
         encoding="utf-8",
     )
-    print(f"Wrote {OUT} with {len(tools)} tools")
+    print(f"Wrote {out_path} with {len(tools)} tools")
 
 
 if __name__ == "__main__":

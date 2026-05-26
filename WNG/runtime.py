@@ -237,9 +237,11 @@ class InProcessRuntimeSession:
 
 def create_runtime_session(include_pro: bool = True, tier: str = "open"):
     mode = os.environ.get("WBW_ARCGIS_RUNTIME_MODE", "auto").strip().lower()
+    external_modes = {"auto", "external", "local"}
+    inprocess_modes = {"auto", "arcgis", "inprocess", "in-process"}
     failures: list[str] = []
 
-    if mode in {"auto", "external", "local"}:
+    if mode in external_modes:
         for python in _candidate_pythons():
             try:
                 session = ExternalRuntimeSession(
@@ -255,13 +257,15 @@ def create_runtime_session(include_pro: bool = True, tier: str = "open"):
                 + " | ".join(failures)
             )
 
-    try:
-        session = InProcessRuntimeSession(include_pro=include_pro, tier=tier)
-        session.get_runtime_capabilities_json()
-        return session
-    except Exception as exc:
-        failures.append(str(exc))
+    if mode in inprocess_modes:
+        try:
+            session = InProcessRuntimeSession(include_pro=include_pro, tier=tier)
+            session.get_runtime_capabilities_json()
+            return session
+        except Exception as exc:
+            failures.append(str(exc))
 
     raise RuntimeBootstrapError(
-        "Unable to initialize whitebox_workflows runtime. " + " | ".join(failures)
+        f"Unable to initialize whitebox_workflows runtime (mode={mode!r}). "
+        + " | ".join(failures)
     )

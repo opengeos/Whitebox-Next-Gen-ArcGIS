@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import os
-import re
 import tempfile
 from typing import Any
 

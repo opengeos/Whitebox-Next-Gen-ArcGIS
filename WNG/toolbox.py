@@ -4,7 +4,6 @@ import json
 import os
 import shutil
 import sys
-import tempfile
 import webbrowser
 from typing import Any
 
@@ -141,7 +140,10 @@ class SearchTools(object):
         return
 
     def execute(self, parameters, messages):
-        query = (parameters[0].valueAsText or "").lower()
+        query = (parameters[0].valueAsText or "").strip().lower()
+        if not query:
+            _messages_add(messages, "Enter a non-empty search term.")
+            return
         matches = []
         for item in default_catalog():
             haystack = " ".join(
@@ -231,7 +233,7 @@ class ToolHelp(object):
 
     def execute(self, parameters, messages):
         tool_id = parameters[0].valueAsText
-        url = f"https://www.whiteboxgeo.com/manual/wbw-user-manual/"
+        url = "https://www.whiteboxgeo.com/manual/wbw-user-manual/"
         _messages_add(messages, f"Tool ID: {tool_id}")
         _messages_add(messages, f"Online manual: {url}")
         try:
