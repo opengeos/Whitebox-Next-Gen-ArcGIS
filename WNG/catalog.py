@@ -7,10 +7,55 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-
 PACKAGE_DIR = Path(__file__).resolve().parent
 DATA_DIR = PACKAGE_DIR / "data"
 CATALOG_SNAPSHOT = DATA_DIR / "catalog_snapshot.json"
+SUBCATEGORY_DISPLAY_OVERRIDES = {
+    "depressions_storage": "Depressions & Storage",
+    "enhancement_contrast": "Enhancement & Contrast",
+    "filtering_classification": "Filtering & Classification",
+    "interpolation_gridding": "Interpolation & Gridding",
+    "sampling_gridding": "Sampling & Gridding",
+    "watersheds_basins": "Watersheds & Basins",
+}
+
+
+def _category_key(text: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(text or "").lower())
+
+
+def _display_taxonomy_part(text: Any) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    if value.lower() in SUBCATEGORY_DISPLAY_OVERRIDES:
+        return SUBCATEGORY_DISPLAY_OVERRIDES[value.lower()]
+    compact = _category_key(value)
+    for key, label in SUBCATEGORY_DISPLAY_OVERRIDES.items():
+        if compact == _category_key(key):
+            return label
+    return " ".join(part.capitalize() for part in value.replace("_", " ").split())
+
+
+def toolbox_category(manifest: dict[str, Any]) -> str:
+    """Return the ArcGIS toolbox category path for a tool manifest.
+
+    Args:
+        manifest: Tool manifest from the live runtime or snapshot catalog.
+
+    Returns:
+        Category path suitable for ArcGIS Python toolbox grouping.
+    """
+    category = str(manifest.get("category") or "").strip()
+    if " - " in category:
+        top, sub = [part.strip() for part in category.split(" - ", 1)]
+        return f"{_display_taxonomy_part(top)}\\{_display_taxonomy_part(sub)}"
+
+    top = _display_taxonomy_part(manifest.get("taxonomy_category"))
+    sub = _display_taxonomy_part(manifest.get("taxonomy_subcategory"))
+    if top and sub and sub.lower() != "general":
+        return f"{top}\\{sub}"
+    return category or top or "General"
 
 
 def humanize_tool_id(tool_id: str) -> str:
@@ -59,7 +104,15 @@ def _merge_snapshot_hints(catalog: list[dict[str, Any]]) -> list[dict[str, Any]]
         fixed = dict(item)
         fixed.setdefault("taxonomy_category", snap.get("taxonomy_category"))
         fixed.setdefault("taxonomy_subcategory", snap.get("taxonomy_subcategory"))
-        if not fixed.get("category"):
+        category = str(fixed.get("category") or "").strip()
+        snap_category = str(snap.get("category") or "").strip()
+        if not category or (
+            snap_category
+            and (
+                category == snap_category.split(" - ", 1)[0]
+                or _category_key(category) == _category_key(snap_category)
+            )
+        ):
             fixed["category"] = snap.get("category", "General")
 
         snap_params = {
