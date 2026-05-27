@@ -15,7 +15,14 @@ except Exception:  # pragma: no cover - allows local smoke tests without ArcGIS
     arcpy = None
 
 from . import __version__
-from .catalog import default_catalog, humanize_tool_id, snapshot_catalog, toolbox_category
+from .catalog import (
+    default_catalog,
+    humanize_tool_id,
+    runtime_catalog,
+    toolbox_catalog,
+    toolbox_category,
+    write_catalog_cache,
+)
 from .parameters import (
     create_parameter,
     ensure_output_file_path,
@@ -295,7 +302,7 @@ class SearchTools(object):
             _messages_add(messages, "Enter a non-empty search term.")
             return
         matches = []
-        for item in default_catalog():
+        for item in toolbox_catalog():
             haystack = " ".join(
                 str(item.get(k, ""))
                 for k in ("id", "display_name", "summary", "category")
@@ -308,6 +315,72 @@ class SearchTools(object):
                 f"{item.get('id')}: {item.get('display_name')} [{item.get('category')}]",
             )
         _messages_add(messages, f"{len(matches)} match(es)")
+
+
+class RefreshToolCatalog(object):
+    label = "Refresh Tool Catalog"
+    description = (
+        "Generates the ArcGIS toolbox catalog from the active Whitebox Workflows "
+        "runtime and license configuration."
+    )
+    category = "Whitebox Next Gen"
+
+    def getParameterInfo(self):
+        return []
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):
+        return
+
+    def updateMessages(self, parameters):
+        return
+
+    def execute(self, parameters, messages):
+        include_pro = os.environ.get(
+            "WBW_ARCGIS_INCLUDE_PRO", "true"
+        ).strip().lower() not in {"0", "false", "no"}
+        tier = os.environ.get("WBW_ARCGIS_TIER", "open").strip() or "open"
+
+        _messages_add(
+            messages,
+            f"Refreshing catalog with include_pro={include_pro}, tier={tier}.",
+        )
+        catalog = runtime_catalog(include_pro=include_pro, tier=tier)
+        if not catalog:
+            raise RuntimeError("The runtime returned an empty tool catalog.")
+
+        path = write_catalog_cache(
+            catalog,
+            metadata={
+                "include_pro": include_pro,
+                "tier": tier,
+                "python": sys.executable,
+                "toolbox_version": __version__,
+            },
+        )
+        locked_count = sum(1 for item in catalog if item.get("locked"))
+        pro_count = sum(
+            1
+            for item in catalog
+            if str(item.get("license_tier", "")).lower() in {"pro", "enterprise"}
+        )
+        _messages_add(messages, f"Wrote catalog cache: {path}")
+        _messages_add(messages, f"Catalog tools: {len(catalog)}")
+        _messages_add(messages, f"Pro-tier tools: {pro_count}")
+        _messages_add(messages, f"Locked tools: {locked_count}")
+        if locked_count:
+            _messages_add(
+                messages,
+                "Some tools are still locked. Run Runtime Diagnostics and confirm "
+                "effective_tier is pro.",
+            )
+        _messages_add(
+            messages,
+            "Refresh the toolbox in the Catalog pane or restart ArcGIS Pro so the "
+            "generated tool classes are reloaded.",
+        )
 
 
 class RunToolJson(object):
@@ -369,7 +442,7 @@ class ToolHelp(object):
             direction="Input",
         )
         tool.filter.type = "ValueList"
-        tool.filter.list = [item.get("id", "") for item in default_catalog()]
+        tool.filter.list = [item.get("id", "") for item in toolbox_catalog()]
         return [tool]
 
     def isLicensed(self):
@@ -613,12 +686,13 @@ def _build_tools():
         RuntimeDiagnostics,
         InstallRequiredPackages,
         SearchTools,
+        RefreshToolCatalog,
         ToolHelp,
         LicenseInstructions,
         RunToolJson,
     ]
     seen: set[str] = set()
-    for manifest in snapshot_catalog():
+    for manifest in toolbox_catalog():
         tool_id = str(manifest.get("id", "")).strip()
         if not tool_id or tool_id in seen:
             continue

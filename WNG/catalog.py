@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,8 @@ from typing import Any
 PACKAGE_DIR = Path(__file__).resolve().parent
 DATA_DIR = PACKAGE_DIR / "data"
 CATALOG_SNAPSHOT = DATA_DIR / "catalog_snapshot.json"
+CATALOG_CACHE_ENV = "WBW_ARCGIS_CATALOG_CACHE"
+CACHE_FILENAME = "catalog_cache.json"
 SUBCATEGORY_DISPLAY_OVERRIDES = {
     "depressions_storage": "Depressions & Storage",
     "enhancement_contrast": "Enhancement & Contrast",
@@ -78,16 +81,69 @@ def _clean_params(params: Any) -> list[dict[str, Any]]:
     ]
 
 
+def _catalog_from_payload(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, dict):
+        catalog = payload.get("tools", [])
+    else:
+        catalog = payload
+    if not isinstance(catalog, list):
+        return []
+    return [item for item in catalog if isinstance(item, dict)]
+
+
+def catalog_cache_path() -> Path:
+    """Return the local generated toolbox catalog cache path.
+
+    Returns:
+        Path to the generated catalog cache JSON file.
+    """
+    configured = os.environ.get(CATALOG_CACHE_ENV)
+    if configured:
+        return Path(configured).expanduser()
+
+    base = (
+        os.environ.get("LOCALAPPDATA")
+        or os.environ.get("APPDATA")
+        or os.environ.get("XDG_CACHE_HOME")
+    )
+    root = Path(base).expanduser() if base else Path.home() / ".cache"
+    return root / "WhiteboxNextGenArcGIS" / CACHE_FILENAME
+
+
 @lru_cache(maxsize=1)
 def load_catalog_snapshot() -> list[dict[str, Any]]:
     if not CATALOG_SNAPSHOT.exists():
         return []
     with CATALOG_SNAPSHOT.open("r", encoding="utf-8") as f:
         payload = json.load(f)
-    catalog = payload.get("tools", payload)
-    if not isinstance(catalog, list):
+    return _catalog_from_payload(payload)
+
+
+@lru_cache(maxsize=8)
+def _load_catalog_cache(path_text: str) -> list[dict[str, Any]]:
+    path = Path(path_text)
+    if not path.exists():
         return []
-    return [item for item in catalog if isinstance(item, dict)]
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return []
+    return [_normalize_runtime_item(item) for item in _catalog_from_payload(payload)]
+
+
+def load_catalog_cache() -> list[dict[str, Any]]:
+    """Return the generated catalog cache without touching the runtime.
+
+    Returns:
+        Normalized cached catalog records, or an empty list when no cache exists.
+    """
+    return _load_catalog_cache(str(catalog_cache_path()))
+
+
+def clear_catalog_cache_memory() -> None:
+    """Clear in-process catalog loader caches."""
+    _load_catalog_cache.cache_clear()
 
 
 def _normalize_runtime_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -155,23 +211,37 @@ def _merge_snapshot_hints(catalog: list[dict[str, Any]]) -> list[dict[str, Any]]
     return out
 
 
+def runtime_catalog(include_pro: bool = True, tier: str = "open") -> list[dict[str, Any]]:
+    """Return catalog records from the live Whitebox Workflows runtime.
+
+    Args:
+        include_pro: Whether Pro tools should be requested from the runtime.
+        tier: Requested Whitebox Workflows tier.
+
+    Returns:
+        Normalized catalog records merged with bundled taxonomy hints.
+    """
+    from .runtime import create_runtime_session
+
+    session = create_runtime_session(include_pro=include_pro, tier=tier)
+    raw = session.list_tool_catalog_json()
+    catalog = json.loads(raw) if isinstance(raw, str) else raw
+    normalized = [
+        _normalize_runtime_item(item)
+        for item in _catalog_from_payload(catalog)
+        if isinstance(item, dict)
+    ]
+    return _merge_snapshot_hints(normalized)
+
+
 def discover_catalog(
     include_pro: bool = True, tier: str = "open"
 ) -> list[dict[str, Any]]:
     """Return the live runtime catalog when available, otherwise the snapshot."""
     try:
-        from .runtime import create_runtime_session
-
-        session = create_runtime_session(include_pro=include_pro, tier=tier)
-        raw = session.list_tool_catalog_json()
-        catalog = json.loads(raw) if isinstance(raw, str) else raw
-        if isinstance(catalog, list) and catalog:
-            normalized = [
-                _normalize_runtime_item(item)
-                for item in catalog
-                if isinstance(item, dict)
-            ]
-            return _merge_snapshot_hints(normalized)
+        catalog = runtime_catalog(include_pro=include_pro, tier=tier)
+        if catalog:
+            return catalog
     except Exception:
         pass
 
@@ -185,6 +255,50 @@ def snapshot_catalog() -> list[dict[str, Any]]:
         Normalized catalog records from the bundled snapshot.
     """
     return [_normalize_runtime_item(item) for item in load_catalog_snapshot()]
+
+
+def toolbox_catalog() -> list[dict[str, Any]]:
+    """Return catalog records used to generate ArcGIS toolbox tool classes.
+
+    This function never touches the runtime, which keeps ArcGIS toolbox discovery
+    stable. It prefers a generated cache so licensed Pro tools can have real
+    parameter definitions after running the refresh utility.
+
+    Returns:
+        Cached catalog records when present, otherwise bundled snapshot records.
+    """
+    return load_catalog_cache() or snapshot_catalog()
+
+
+def write_catalog_cache(
+    catalog: list[dict[str, Any]],
+    metadata: dict[str, Any] | None = None,
+    path: Path | None = None,
+) -> Path:
+    """Write a generated toolbox catalog cache.
+
+    Args:
+        catalog: Catalog records from the live runtime.
+        metadata: Optional metadata to include beside the tools list.
+        path: Optional override for the cache file path.
+
+    Returns:
+        Path to the written cache file.
+    """
+    target = path or catalog_cache_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "metadata": metadata or {},
+        "tools": [_normalize_runtime_item(item) for item in catalog],
+    }
+    tmp = target.with_name(target.name + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+        f.write("\n")
+    tmp.replace(target)
+    clear_catalog_cache_memory()
+    return target
 
 
 def default_catalog() -> list[dict[str, Any]]:

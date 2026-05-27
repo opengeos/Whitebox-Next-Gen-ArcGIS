@@ -5,6 +5,25 @@ import importlib.machinery
 import importlib.util
 from pathlib import Path
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolated_catalog_cache(monkeypatch, tmp_path):
+    """Keep generated toolbox catalog caches isolated per test.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    catalog = importlib.import_module("WNG.catalog")
+    monkeypatch.setenv(
+        "WBW_ARCGIS_CATALOG_CACHE", str(tmp_path / "missing_catalog_cache.json")
+    )
+    catalog.clear_catalog_cache_memory()
+    yield
+    catalog.clear_catalog_cache_memory()
+
 
 class _Filter:
     def __init__(self):
@@ -73,6 +92,47 @@ def test_toolbox_load_does_not_touch_runtime(monkeypatch):
     assert len(tb.tools) > 10
 
 
+def test_toolbox_load_uses_generated_catalog_cache(monkeypatch, tmp_path):
+    catalog = importlib.import_module("WNG.catalog")
+    toolbox = importlib.import_module("WNG.toolbox")
+    cache_path = tmp_path / "catalog_cache.json"
+    monkeypatch.setenv("WBW_ARCGIS_CATALOG_CACHE", str(cache_path))
+    catalog.clear_catalog_cache_memory()
+    catalog.write_catalog_cache(
+        [
+            {
+                "id": "pro_cached_tool",
+                "display_name": "Pro Cached Tool",
+                "summary": "Cached Pro tool.",
+                "category": "Other",
+                "license_tier": "pro",
+                "locked": False,
+                "available": True,
+                "params": [
+                    {
+                        "name": "input",
+                        "description": "Input raster",
+                        "type": "Raster",
+                        "kind": "raster_in",
+                        "required": True,
+                    }
+                ],
+            }
+        ]
+    )
+    monkeypatch.setattr(toolbox, "arcpy", _Arcpy())
+
+    tb = toolbox.Toolbox()
+    tool_cls = next(
+        cls
+        for cls in tb.tools
+        if getattr(cls, "_manifest", {}).get("id") == "pro_cached_tool"
+    )
+    tool = tool_cls()
+    assert tool.label == "Pro Cached Tool"
+    assert [param.name for param in tool.getParameterInfo()] == ["input"]
+
+
 def test_install_required_packages_defaults(monkeypatch):
     toolbox = importlib.import_module("WNG.toolbox")
     monkeypatch.setattr(toolbox, "arcpy", _Arcpy())
@@ -136,6 +196,39 @@ def test_locked_tools_include_unlock_instructions(monkeypatch):
         assert "License Instructions" in str(exc)
     else:
         raise AssertionError("locked tool should raise RuntimeError")
+
+
+def test_refresh_tool_catalog_writes_generated_cache(monkeypatch, tmp_path):
+    catalog = importlib.import_module("WNG.catalog")
+    toolbox = importlib.import_module("WNG.toolbox")
+    cache_path = tmp_path / "catalog_cache.json"
+    monkeypatch.setenv("WBW_ARCGIS_CATALOG_CACHE", str(cache_path))
+    catalog.clear_catalog_cache_memory()
+    monkeypatch.setattr(toolbox, "arcpy", _Arcpy())
+    monkeypatch.setattr(
+        toolbox,
+        "runtime_catalog",
+        lambda include_pro, tier: [
+            {
+                "id": "licensed_tool",
+                "display_name": "Licensed Tool",
+                "summary": "",
+                "category": "Other",
+                "license_tier": "pro",
+                "locked": False,
+                "available": True,
+                "params": [],
+            }
+        ],
+    )
+    messages = _Messages()
+
+    toolbox.RefreshToolCatalog().execute([], messages)
+
+    assert cache_path.exists()
+    cached_ids = [item["id"] for item in catalog.load_catalog_cache()]
+    assert cached_ids == ["licensed_tool"]
+    assert any("Wrote catalog cache" in text for text in messages.text)
 
 
 def test_variadic_snapshot_params_are_hidden(monkeypatch):

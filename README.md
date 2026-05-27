@@ -37,7 +37,16 @@ The main toolbox is `WhiteboxNextGen.pyt`.
 
    ![](https://github.com/user-attachments/assets/b19cb54f-7301-4525-ac08-3f9af042ee21)
 
-4. Run tools.
+4. Run `Refresh Tool Catalog`.
+
+   Run **Refresh Tool Catalog** after installing packages, after changing
+   license environment variables, or after upgrading `whitebox-workflows`. This
+   generates a local ArcGIS toolbox catalog from the active runtime. With a
+   valid Pro license, this step generates the ArcGIS tool entries and parameter
+   forms for Pro tools. Refresh the toolbox in the Catalog pane or restart
+   ArcGIS Pro after the tool completes.
+
+5. Run tools.
 
    Choose any tool from the toolbox categories, set input datasets and output
    file paths, then run the tool. Outputs should be saved as files in the
@@ -65,7 +74,7 @@ Useful environment variables:
 
 Pro tools require a Whitebox Workflows build with Pro support and a valid Pro
 license. Set these variables in the environment used to launch ArcGIS Pro, then
-restart ArcGIS Pro and run `Runtime Diagnostics`.
+restart ArcGIS Pro, run `Runtime Diagnostics`, and run `Refresh Tool Catalog`.
 
 Common Pro settings:
 
