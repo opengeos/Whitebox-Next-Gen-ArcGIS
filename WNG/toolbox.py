@@ -424,8 +424,8 @@ class LicenseInstructions(object):
         _messages_add(
             messages,
             "Floating license variables: WBW_ARCGIS_FLOATING_LICENSE_ID, "
-            "WBW_LICENSE_PROVIDER_URL, WBW_ARCGIS_MACHINE_ID, "
-            "WBW_ARCGIS_CUSTOMER_ID.",
+            "WBW_ARCGIS_LICENSE_PROVIDER_URL (or WBW_LICENSE_PROVIDER_URL), "
+            "WBW_ARCGIS_MACHINE_ID, WBW_ARCGIS_CUSTOMER_ID.",
         )
         _messages_add(
             messages,

@@ -245,6 +245,78 @@ def test_runtime_session_uses_signed_entitlement_file_env(monkeypatch, tmp_path)
     }
 
 
+def test_floating_license_mode_without_id_raises(monkeypatch):
+    runtime = importlib.import_module("WNG.runtime")
+
+    class _Wbw:
+        class RuntimeSession:
+            pass
+
+    monkeypatch.setenv("WBW_ARCGIS_LICENSE_MODE", "floating")
+    monkeypatch.delenv("WBW_ARCGIS_FLOATING_LICENSE_ID", raising=False)
+    monkeypatch.delenv("WBW_FLOATING_LICENSE_ID", raising=False)
+    try:
+        runtime._create_runtime_session_from_env(_Wbw, include_pro=True, tier="pro")
+    except runtime.RuntimeBootstrapError as exc:
+        assert "WBW_ARCGIS_FLOATING_LICENSE_ID" in str(exc)
+    else:
+        raise AssertionError("floating mode without license ID should raise")
+
+
+def test_signed_file_mode_without_path_raises(monkeypatch):
+    runtime = importlib.import_module("WNG.runtime")
+
+    class _Wbw:
+        class RuntimeSession:
+            pass
+
+    monkeypatch.setenv("WBW_ARCGIS_LICENSE_MODE", "signed_file")
+    monkeypatch.delenv("WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE", raising=False)
+    monkeypatch.delenv("WBW_SIGNED_ENTITLEMENT_FILE", raising=False)
+    try:
+        runtime._create_runtime_session_from_env(_Wbw, include_pro=True, tier="pro")
+    except runtime.RuntimeBootstrapError as exc:
+        assert "WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE" in str(exc)
+    else:
+        raise AssertionError("signed_file mode without path should raise")
+
+
+def test_signed_file_mode_with_missing_file_raises(monkeypatch, tmp_path):
+    runtime = importlib.import_module("WNG.runtime")
+
+    class _Wbw:
+        class RuntimeSession:
+            pass
+
+    missing = tmp_path / "does_not_exist.json"
+    monkeypatch.setenv("WBW_ARCGIS_LICENSE_MODE", "signed_file")
+    monkeypatch.setenv("WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE", str(missing))
+    try:
+        runtime._create_runtime_session_from_env(_Wbw, include_pro=True, tier="pro")
+    except runtime.RuntimeBootstrapError as exc:
+        assert "does not exist" in str(exc)
+    else:
+        raise AssertionError("signed_file mode with missing file should raise")
+
+
+def test_signed_json_mode_without_payload_raises(monkeypatch):
+    runtime = importlib.import_module("WNG.runtime")
+
+    class _Wbw:
+        class RuntimeSession:
+            pass
+
+    monkeypatch.setenv("WBW_ARCGIS_LICENSE_MODE", "signed_json")
+    monkeypatch.delenv("WBW_ARCGIS_SIGNED_ENTITLEMENT_JSON", raising=False)
+    monkeypatch.delenv("WBW_SIGNED_ENTITLEMENT_JSON", raising=False)
+    try:
+        runtime._create_runtime_session_from_env(_Wbw, include_pro=True, tier="pro")
+    except runtime.RuntimeBootstrapError as exc:
+        assert "WBW_ARCGIS_SIGNED_ENTITLEMENT_JSON" in str(exc)
+    else:
+        raise AssertionError("signed_json mode without JSON should raise")
+
+
 def test_output_paths_are_set_for_arcgis_autoload(monkeypatch, tmp_path):
     toolbox = importlib.import_module("WNG.toolbox")
     set_parameters = {}

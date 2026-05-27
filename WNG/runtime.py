@@ -58,6 +58,8 @@ def _runtime_session_factory_script() -> str:
         "    entitlement_json=_env_first('WBW_ARCGIS_SIGNED_ENTITLEMENT_JSON', 'WBW_SIGNED_ENTITLEMENT_JSON')\n"
         "    fallback=_env_first('WBW_ARCGIS_FALLBACK_TIER', 'WBW_FALLBACK_TIER') or 'open'\n"
         "    if mode in ('floating', 'floating_license') or floating_id:\n"
+        "        if not floating_id:\n"
+        "            raise RuntimeError('WBW_ARCGIS_LICENSE_MODE selects a floating license but no license ID was provided. Set WBW_ARCGIS_FLOATING_LICENSE_ID (or WBW_FLOATING_LICENSE_ID).')\n"
         "        factory=getattr(wbw.RuntimeSession, 'from_floating_license_id', None)\n"
         "        if not callable(factory):\n"
         "            raise RuntimeError('whitebox_workflows RuntimeSession does not support floating licenses')\n"
@@ -65,11 +67,15 @@ def _runtime_session_factory_script() -> str:
         "            floating_id,\n"
         "            include_pro=True,\n"
         "            fallback_tier=fallback,\n"
-        "            provider_url=_env_first('WBW_LICENSE_PROVIDER_URL', 'WBW_ARCGIS_LICENSE_PROVIDER_URL') or None,\n"
+        "            provider_url=_env_first('WBW_ARCGIS_LICENSE_PROVIDER_URL', 'WBW_LICENSE_PROVIDER_URL') or None,\n"
         "            machine_id=_env_first('WBW_ARCGIS_MACHINE_ID', 'WBW_MACHINE_ID') or None,\n"
         "            customer_id=_env_first('WBW_ARCGIS_CUSTOMER_ID', 'WBW_CUSTOMER_ID') or None,\n"
         "        )\n"
         "    if mode in ('signed_file', 'signed_entitlement_file') or entitlement_file:\n"
+        "        if not entitlement_file:\n"
+        "            raise RuntimeError('WBW_ARCGIS_LICENSE_MODE selects a signed entitlement file but no file path was provided. Set WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE (or WBW_SIGNED_ENTITLEMENT_FILE).')\n"
+        "        if not os.path.isfile(entitlement_file):\n"
+        "            raise RuntimeError('Signed entitlement file does not exist: ' + entitlement_file)\n"
         "        factory=getattr(wbw.RuntimeSession, 'from_signed_entitlement_file', None)\n"
         "        if callable(factory):\n"
         "            return factory(\n"
@@ -82,6 +88,8 @@ def _runtime_session_factory_script() -> str:
         "        with open(entitlement_file, 'r', encoding='utf-8') as f:\n"
         "            entitlement_json=f.read()\n"
         "    if mode in ('signed_json', 'signed_entitlement_json') or entitlement_json:\n"
+        "        if not entitlement_json:\n"
+        "            raise RuntimeError('WBW_ARCGIS_LICENSE_MODE selects a signed entitlement JSON but no JSON was provided. Set WBW_ARCGIS_SIGNED_ENTITLEMENT_JSON (or WBW_SIGNED_ENTITLEMENT_JSON).')\n"
         "        factory=getattr(wbw.RuntimeSession, 'from_signed_entitlement_json', None)\n"
         "        if not callable(factory):\n"
         "            raise RuntimeError('whitebox_workflows RuntimeSession does not support signed entitlements')\n"
@@ -120,6 +128,12 @@ def _create_runtime_session_from_env(wbw, include_pro: bool, tier: str):
     fallback = _env_first("WBW_ARCGIS_FALLBACK_TIER", "WBW_FALLBACK_TIER") or "open"
 
     if mode in {"floating", "floating_license"} or floating_id:
+        if not floating_id:
+            raise RuntimeBootstrapError(
+                "WBW_ARCGIS_LICENSE_MODE selects a floating license but no license "
+                "ID was provided. Set WBW_ARCGIS_FLOATING_LICENSE_ID "
+                "(or WBW_FLOATING_LICENSE_ID)."
+            )
         factory = getattr(wbw.RuntimeSession, "from_floating_license_id", None)
         if not callable(factory):
             raise RuntimeBootstrapError(
@@ -130,7 +144,7 @@ def _create_runtime_session_from_env(wbw, include_pro: bool, tier: str):
             include_pro=True,
             fallback_tier=fallback,
             provider_url=_env_first(
-                "WBW_LICENSE_PROVIDER_URL", "WBW_ARCGIS_LICENSE_PROVIDER_URL"
+                "WBW_ARCGIS_LICENSE_PROVIDER_URL", "WBW_LICENSE_PROVIDER_URL"
             )
             or None,
             machine_id=_env_first("WBW_ARCGIS_MACHINE_ID", "WBW_MACHINE_ID") or None,
@@ -139,6 +153,16 @@ def _create_runtime_session_from_env(wbw, include_pro: bool, tier: str):
         )
 
     if mode in {"signed_file", "signed_entitlement_file"} or entitlement_file:
+        if not entitlement_file:
+            raise RuntimeBootstrapError(
+                "WBW_ARCGIS_LICENSE_MODE selects a signed entitlement file but no "
+                "file path was provided. Set WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE "
+                "(or WBW_SIGNED_ENTITLEMENT_FILE)."
+            )
+        if not os.path.isfile(entitlement_file):
+            raise RuntimeBootstrapError(
+                f"Signed entitlement file does not exist: {entitlement_file}"
+            )
         factory = getattr(wbw.RuntimeSession, "from_signed_entitlement_file", None)
         if callable(factory):
             return factory(
@@ -156,6 +180,12 @@ def _create_runtime_session_from_env(wbw, include_pro: bool, tier: str):
             entitlement_json = f.read()
 
     if mode in {"signed_json", "signed_entitlement_json"} or entitlement_json:
+        if not entitlement_json:
+            raise RuntimeBootstrapError(
+                "WBW_ARCGIS_LICENSE_MODE selects a signed entitlement JSON but no "
+                "JSON was provided. Set WBW_ARCGIS_SIGNED_ENTITLEMENT_JSON "
+                "(or WBW_SIGNED_ENTITLEMENT_JSON)."
+            )
         factory = getattr(wbw.RuntimeSession, "from_signed_entitlement_json", None)
         if not callable(factory):
             raise RuntimeBootstrapError(

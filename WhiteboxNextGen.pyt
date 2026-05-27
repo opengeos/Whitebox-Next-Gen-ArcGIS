@@ -9,7 +9,9 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 _IMPORT_ERROR = ""
-_IMPORT_LOG_PATH = os.path.join(tempfile.gettempdir(), "WhiteboxNextGen_import_error.txt")
+_IMPORT_LOG_PATH = os.path.join(
+    tempfile.gettempdir(), f"WhiteboxNextGen_import_error_{os.getpid()}.txt"
+)
 
 try:
     from WNG import toolbox as _toolbox  # noqa: E402
@@ -86,11 +88,14 @@ class ImportDiagnostics(object):
             messages: ArcGIS geoprocessing message object.
         """
         text = _IMPORT_ERROR or "The toolbox support package imported successfully."
+        log_line = f"Import log: {_IMPORT_LOG_PATH}" if _IMPORT_ERROR else ""
         if hasattr(messages, "addMessage"):
-            messages.addMessage(f"Import log: {_IMPORT_LOG_PATH}")
+            if log_line:
+                messages.addMessage(log_line)
             messages.addMessage(text)
         else:
-            print(f"Import log: {_IMPORT_LOG_PATH}")
+            if log_line:
+                print(log_line)
             print(text)
 
 

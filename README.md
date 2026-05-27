@@ -77,7 +77,7 @@ Floating license:
 
 - `WBW_ARCGIS_LICENSE_MODE`: set to `floating`.
 - `WBW_ARCGIS_FLOATING_LICENSE_ID`: floating license ID, for example `fl_12345`.
-- `WBW_LICENSE_PROVIDER_URL`: license provider URL.
+- `WBW_ARCGIS_LICENSE_PROVIDER_URL` (or `WBW_LICENSE_PROVIDER_URL`): license provider URL.
 - `WBW_ARCGIS_MACHINE_ID`: optional machine identifier.
 - `WBW_ARCGIS_CUSTOMER_ID`: optional customer identifier.
 
