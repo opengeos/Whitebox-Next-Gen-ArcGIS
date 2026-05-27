@@ -1,12 +1,28 @@
 import os
 import sys
+import tempfile
+import traceback
 
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from WNG import toolbox as _toolbox  # noqa: E402
+_IMPORT_ERROR = ""
+_IMPORT_LOG_PATH = os.path.join(
+    tempfile.gettempdir(), f"WhiteboxNextGen_import_error_{os.getpid()}.txt"
+)
+
+try:
+    from WNG import toolbox as _toolbox  # noqa: E402
+except Exception:
+    _toolbox = None
+    _IMPORT_ERROR = traceback.format_exc()
+    try:
+        with open(_IMPORT_LOG_PATH, "w", encoding="utf-8") as f:
+            f.write(_IMPORT_ERROR)
+    except Exception:
+        pass
 
 
 def _export_tool_classes(tool_classes):
@@ -33,7 +49,70 @@ def _export_tool_classes(tool_classes):
     return exported
 
 
-_TOOLS = _export_tool_classes(_toolbox._build_tools())
+class ImportDiagnostics(object):
+    """Report import failures that prevent full toolbox initialization."""
+
+    label = "Import Diagnostics"
+    description = "Reports why the Whitebox Next Gen toolbox could not fully load."
+    category = "Whitebox Next Gen"
+
+    def getParameterInfo(self):
+        """Return no parameters.
+
+        Returns:
+            An empty parameter list.
+        """
+        return []
+
+    def isLicensed(self):
+        """Return whether this diagnostic tool is licensed.
+
+        Returns:
+            Always True.
+        """
+        return True
+
+    def updateParameters(self, parameters):
+        """Update parameters."""
+        return
+
+    def updateMessages(self, parameters):
+        """Update messages."""
+        return
+
+    def execute(self, parameters, messages):
+        """Write the import diagnostic message.
+
+        Args:
+            parameters: ArcGIS parameter list.
+            messages: ArcGIS geoprocessing message object.
+        """
+        text = _IMPORT_ERROR or "The toolbox support package imported successfully."
+        log_line = f"Import log: {_IMPORT_LOG_PATH}" if _IMPORT_ERROR else ""
+        if hasattr(messages, "addMessage"):
+            if log_line:
+                messages.addMessage(log_line)
+            messages.addMessage(text)
+        else:
+            if log_line:
+                print(log_line)
+            print(text)
+
+
+try:
+    _TOOLS = (
+        _export_tool_classes(_toolbox._build_tools())
+        if _toolbox is not None
+        else [ImportDiagnostics]
+    )
+except Exception:
+    _IMPORT_ERROR = traceback.format_exc()
+    try:
+        with open(_IMPORT_LOG_PATH, "w", encoding="utf-8") as f:
+            f.write(_IMPORT_ERROR)
+    except Exception:
+        pass
+    _TOOLS = [ImportDiagnostics]
 
 
 class Toolbox(object):

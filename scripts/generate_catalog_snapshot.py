@@ -326,7 +326,11 @@ def signatures(stub_text: str) -> dict[str, dict[str, Any]]:
                 pname, ptype = [x.strip() for x in left.split(":", 1)]
             else:
                 pname, ptype = left.strip(), "Any"
-            if pname in {"self", "env", "callback", "kwargs", "args"} or not pname:
+            if (
+                pname in {"self", "env", "callback", "kwargs", "args"}
+                or pname.startswith("*")
+                or not pname
+            ):
                 continue
             options = enum_options(pname, default)
             kind = infer_kind(pname, ptype, ret, default, options, name)

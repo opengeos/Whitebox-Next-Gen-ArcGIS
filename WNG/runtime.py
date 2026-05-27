@@ -34,6 +34,176 @@ def _subprocess_startup_kwargs() -> dict[str, Any]:
     return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
 
 
+def _env_first(*names: str) -> str:
+    for name in names:
+        value = os.environ.get(name)
+        if value not in {None, ""}:
+            return str(value)
+    return ""
+
+
+def _runtime_session_factory_script() -> str:
+    return (
+        "import os\n"
+        "def _env_first(*names):\n"
+        "    for name in names:\n"
+        "        value=os.environ.get(name)\n"
+        "        if value not in (None, ''):\n"
+        "            return str(value)\n"
+        "    return ''\n"
+        "def _make_session(wbw, include_pro, tier):\n"
+        "    mode=_env_first('WBW_ARCGIS_LICENSE_MODE').strip().lower()\n"
+        "    floating_id=_env_first('WBW_ARCGIS_FLOATING_LICENSE_ID', 'WBW_FLOATING_LICENSE_ID')\n"
+        "    entitlement_file=_env_first('WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE', 'WBW_SIGNED_ENTITLEMENT_FILE')\n"
+        "    entitlement_json=_env_first('WBW_ARCGIS_SIGNED_ENTITLEMENT_JSON', 'WBW_SIGNED_ENTITLEMENT_JSON')\n"
+        "    fallback=_env_first('WBW_ARCGIS_FALLBACK_TIER', 'WBW_FALLBACK_TIER') or 'open'\n"
+        "    if mode in ('floating', 'floating_license') or floating_id:\n"
+        "        if not floating_id:\n"
+        "            raise RuntimeError('WBW_ARCGIS_LICENSE_MODE selects a floating license but no license ID was provided. Set WBW_ARCGIS_FLOATING_LICENSE_ID (or WBW_FLOATING_LICENSE_ID).')\n"
+        "        factory=getattr(wbw.RuntimeSession, 'from_floating_license_id', None)\n"
+        "        if not callable(factory):\n"
+        "            raise RuntimeError('whitebox_workflows RuntimeSession does not support floating licenses')\n"
+        "        return factory(\n"
+        "            floating_id,\n"
+        "            include_pro=True,\n"
+        "            fallback_tier=fallback,\n"
+        "            provider_url=_env_first('WBW_ARCGIS_LICENSE_PROVIDER_URL', 'WBW_LICENSE_PROVIDER_URL') or None,\n"
+        "            machine_id=_env_first('WBW_ARCGIS_MACHINE_ID', 'WBW_MACHINE_ID') or None,\n"
+        "            customer_id=_env_first('WBW_ARCGIS_CUSTOMER_ID', 'WBW_CUSTOMER_ID') or None,\n"
+        "        )\n"
+        "    if mode in ('signed_file', 'signed_entitlement_file') or entitlement_file:\n"
+        "        if not entitlement_file:\n"
+        "            raise RuntimeError('WBW_ARCGIS_LICENSE_MODE selects a signed entitlement file but no file path was provided. Set WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE (or WBW_SIGNED_ENTITLEMENT_FILE).')\n"
+        "        if not os.path.isfile(entitlement_file):\n"
+        "            raise RuntimeError('Signed entitlement file does not exist: ' + entitlement_file)\n"
+        "        factory=getattr(wbw.RuntimeSession, 'from_signed_entitlement_file', None)\n"
+        "        if callable(factory):\n"
+        "            return factory(\n"
+        "                entitlement_file,\n"
+        "                public_key_kid=_env_first('WBW_ARCGIS_PUBLIC_KEY_KID', 'WBW_PUBLIC_KEY_KID'),\n"
+        "                public_key_b64url=_env_first('WBW_ARCGIS_PUBLIC_KEY_B64URL', 'WBW_PUBLIC_KEY_B64URL'),\n"
+        "                include_pro=True,\n"
+        "                fallback_tier=fallback,\n"
+        "            )\n"
+        "        with open(entitlement_file, 'r', encoding='utf-8') as f:\n"
+        "            entitlement_json=f.read()\n"
+        "    if mode in ('signed_json', 'signed_entitlement_json') or entitlement_json:\n"
+        "        if not entitlement_json:\n"
+        "            raise RuntimeError('WBW_ARCGIS_LICENSE_MODE selects a signed entitlement JSON but no JSON was provided. Set WBW_ARCGIS_SIGNED_ENTITLEMENT_JSON (or WBW_SIGNED_ENTITLEMENT_JSON).')\n"
+        "        factory=getattr(wbw.RuntimeSession, 'from_signed_entitlement_json', None)\n"
+        "        if not callable(factory):\n"
+        "            raise RuntimeError('whitebox_workflows RuntimeSession does not support signed entitlements')\n"
+        "        return factory(\n"
+        "            entitlement_json,\n"
+        "            public_key_kid=_env_first('WBW_ARCGIS_PUBLIC_KEY_KID', 'WBW_PUBLIC_KEY_KID'),\n"
+        "            public_key_b64url=_env_first('WBW_ARCGIS_PUBLIC_KEY_B64URL', 'WBW_PUBLIC_KEY_B64URL'),\n"
+        "            include_pro=True,\n"
+        "            fallback_tier=fallback,\n"
+        "        )\n"
+        "    return wbw.RuntimeSession(include_pro=include_pro, tier=tier)\n"
+    )
+
+
+def _create_runtime_session_from_env(wbw, include_pro: bool, tier: str):
+    """Create a Whitebox RuntimeSession using ArcGIS licensing environment vars.
+
+    Args:
+        wbw: Imported ``whitebox_workflows`` module.
+        include_pro: Whether Pro tools should be visible.
+        tier: Requested runtime tier.
+
+    Returns:
+        A ``whitebox_workflows.RuntimeSession`` instance.
+    """
+    mode = _env_first("WBW_ARCGIS_LICENSE_MODE").strip().lower()
+    floating_id = _env_first(
+        "WBW_ARCGIS_FLOATING_LICENSE_ID", "WBW_FLOATING_LICENSE_ID"
+    )
+    entitlement_file = _env_first(
+        "WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE", "WBW_SIGNED_ENTITLEMENT_FILE"
+    )
+    entitlement_json = _env_first(
+        "WBW_ARCGIS_SIGNED_ENTITLEMENT_JSON", "WBW_SIGNED_ENTITLEMENT_JSON"
+    )
+    fallback = _env_first("WBW_ARCGIS_FALLBACK_TIER", "WBW_FALLBACK_TIER") or "open"
+
+    if mode in {"floating", "floating_license"} or floating_id:
+        if not floating_id:
+            raise RuntimeBootstrapError(
+                "WBW_ARCGIS_LICENSE_MODE selects a floating license but no license "
+                "ID was provided. Set WBW_ARCGIS_FLOATING_LICENSE_ID "
+                "(or WBW_FLOATING_LICENSE_ID)."
+            )
+        factory = getattr(wbw.RuntimeSession, "from_floating_license_id", None)
+        if not callable(factory):
+            raise RuntimeBootstrapError(
+                "whitebox_workflows RuntimeSession does not support floating licenses"
+            )
+        return factory(
+            floating_id,
+            include_pro=True,
+            fallback_tier=fallback,
+            provider_url=_env_first(
+                "WBW_ARCGIS_LICENSE_PROVIDER_URL", "WBW_LICENSE_PROVIDER_URL"
+            )
+            or None,
+            machine_id=_env_first("WBW_ARCGIS_MACHINE_ID", "WBW_MACHINE_ID") or None,
+            customer_id=_env_first("WBW_ARCGIS_CUSTOMER_ID", "WBW_CUSTOMER_ID")
+            or None,
+        )
+
+    if mode in {"signed_file", "signed_entitlement_file"} or entitlement_file:
+        if not entitlement_file:
+            raise RuntimeBootstrapError(
+                "WBW_ARCGIS_LICENSE_MODE selects a signed entitlement file but no "
+                "file path was provided. Set WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE "
+                "(or WBW_SIGNED_ENTITLEMENT_FILE)."
+            )
+        if not os.path.isfile(entitlement_file):
+            raise RuntimeBootstrapError(
+                f"Signed entitlement file does not exist: {entitlement_file}"
+            )
+        factory = getattr(wbw.RuntimeSession, "from_signed_entitlement_file", None)
+        if callable(factory):
+            return factory(
+                entitlement_file,
+                public_key_kid=_env_first(
+                    "WBW_ARCGIS_PUBLIC_KEY_KID", "WBW_PUBLIC_KEY_KID"
+                ),
+                public_key_b64url=_env_first(
+                    "WBW_ARCGIS_PUBLIC_KEY_B64URL", "WBW_PUBLIC_KEY_B64URL"
+                ),
+                include_pro=True,
+                fallback_tier=fallback,
+            )
+        with open(entitlement_file, "r", encoding="utf-8") as f:
+            entitlement_json = f.read()
+
+    if mode in {"signed_json", "signed_entitlement_json"} or entitlement_json:
+        if not entitlement_json:
+            raise RuntimeBootstrapError(
+                "WBW_ARCGIS_LICENSE_MODE selects a signed entitlement JSON but no "
+                "JSON was provided. Set WBW_ARCGIS_SIGNED_ENTITLEMENT_JSON "
+                "(or WBW_SIGNED_ENTITLEMENT_JSON)."
+            )
+        factory = getattr(wbw.RuntimeSession, "from_signed_entitlement_json", None)
+        if not callable(factory):
+            raise RuntimeBootstrapError(
+                "whitebox_workflows RuntimeSession does not support signed entitlements"
+            )
+        return factory(
+            entitlement_json,
+            public_key_kid=_env_first("WBW_ARCGIS_PUBLIC_KEY_KID", "WBW_PUBLIC_KEY_KID"),
+            public_key_b64url=_env_first(
+                "WBW_ARCGIS_PUBLIC_KEY_B64URL", "WBW_PUBLIC_KEY_B64URL"
+            ),
+            include_pro=True,
+            fallback_tier=fallback,
+        )
+
+    return wbw.RuntimeSession(include_pro=include_pro, tier=tier)
+
+
 def _candidate_pythons() -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -85,13 +255,16 @@ class ExternalRuntimeSession:
             "    sys.stdout.reconfigure(encoding='utf-8')\n"
             "except Exception:\n"
             "    pass\n"
+        )
+        runner += _runtime_session_factory_script()
+        runner += (
             "import whitebox_workflows as wbw\n"
             "p=json.loads(sys.argv[1])\n"
             "include_pro=bool(p.get('include_pro', True))\n"
             "tier=str(p.get('tier','open'))\n"
             "m=p.get('method')\n"
             "if hasattr(wbw, 'RuntimeSession'):\n"
-            "    s=wbw.RuntimeSession(include_pro=include_pro, tier=tier)\n"
+            "    s=_make_session(wbw, include_pro, tier)\n"
             "    if m=='capabilities': out=s.get_runtime_capabilities_json()\n"
             "    elif m=='catalog': out=s.list_tool_catalog_json()\n"
             "    elif m=='metadata': out=s.get_tool_metadata_json(str(p.get('tool_id','')))\n"
@@ -151,6 +324,9 @@ class ExternalRuntimeSession:
             "    sys.stdout.reconfigure(encoding='utf-8')\n"
             "except Exception:\n"
             "    pass\n"
+        )
+        runner += _runtime_session_factory_script()
+        runner += (
             "import whitebox_workflows as wbw\n"
             "p=json.loads(sys.argv[1])\n"
             "def emit(evt):\n"
@@ -160,7 +336,7 @@ class ExternalRuntimeSession:
             "tool_id=str(p.get('tool_id','')); args_json=str(p.get('args_json','{}'))\n"
             "try:\n"
             "    if hasattr(wbw, 'RuntimeSession'):\n"
-            "        s=wbw.RuntimeSession(include_pro=include_pro, tier=tier)\n"
+            "        s=_make_session(wbw, include_pro, tier)\n"
             "        if hasattr(s, 'run_tool_json_stream'):\n"
             "            out=s.run_tool_json_stream(tool_id, args_json, emit)\n"
             "        else:\n"
@@ -227,8 +403,8 @@ class InProcessRuntimeSession:
         self.include_pro = bool(include_pro)
         self.tier = str(tier or "open")
         if hasattr(wbw, "RuntimeSession"):
-            self._session = wbw.RuntimeSession(
-                include_pro=self.include_pro, tier=self.tier
+            self._session = _create_runtime_session_from_env(
+                wbw, include_pro=self.include_pro, tier=self.tier
             )
         else:
             self._session = None

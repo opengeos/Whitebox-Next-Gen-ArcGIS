@@ -5,6 +5,25 @@ import importlib.machinery
 import importlib.util
 from pathlib import Path
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolated_catalog_cache(monkeypatch, tmp_path):
+    """Keep generated toolbox catalog caches isolated per test.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    catalog = importlib.import_module("WNG.catalog")
+    monkeypatch.setenv(
+        "WBW_ARCGIS_CATALOG_CACHE", str(tmp_path / "missing_catalog_cache.json")
+    )
+    catalog.clear_catalog_cache_memory()
+    yield
+    catalog.clear_catalog_cache_memory()
+
 
 class _Filter:
     def __init__(self):
@@ -59,6 +78,59 @@ def test_toolbox_loads_with_arcpy_stub(monkeypatch):
     assert tb.alias == "WNG"
     assert len(tb.tools) > 10
     assert toolbox.InstallRequiredPackages in tb.tools
+
+
+def test_toolbox_load_does_not_touch_runtime(monkeypatch):
+    toolbox = importlib.import_module("WNG.toolbox")
+
+    def fail_live_catalog(*args, **kwargs):
+        raise AssertionError("toolbox discovery must not use the live catalog")
+
+    monkeypatch.setattr(toolbox, "default_catalog", fail_live_catalog)
+    monkeypatch.setattr(toolbox, "arcpy", _Arcpy())
+    tb = toolbox.Toolbox()
+    assert len(tb.tools) > 10
+
+
+def test_toolbox_load_uses_generated_catalog_cache(monkeypatch, tmp_path):
+    catalog = importlib.import_module("WNG.catalog")
+    toolbox = importlib.import_module("WNG.toolbox")
+    cache_path = tmp_path / "catalog_cache.json"
+    monkeypatch.setenv("WBW_ARCGIS_CATALOG_CACHE", str(cache_path))
+    catalog.clear_catalog_cache_memory()
+    catalog.write_catalog_cache(
+        [
+            {
+                "id": "pro_cached_tool",
+                "display_name": "Pro Cached Tool",
+                "summary": "Cached Pro tool.",
+                "category": "Other",
+                "license_tier": "pro",
+                "locked": False,
+                "available": True,
+                "params": [
+                    {
+                        "name": "input",
+                        "description": "Input raster",
+                        "type": "Raster",
+                        "kind": "raster_in",
+                        "required": True,
+                    }
+                ],
+            }
+        ]
+    )
+    monkeypatch.setattr(toolbox, "arcpy", _Arcpy())
+
+    tb = toolbox.Toolbox()
+    tool_cls = next(
+        cls
+        for cls in tb.tools
+        if getattr(cls, "_manifest", {}).get("id") == "pro_cached_tool"
+    )
+    tool = tool_cls()
+    assert tool.label == "Pro Cached Tool"
+    assert [param.name for param in tool.getParameterInfo()] == ["input"]
 
 
 def test_install_required_packages_defaults(monkeypatch):
@@ -126,6 +198,58 @@ def test_locked_tools_include_unlock_instructions(monkeypatch):
         raise AssertionError("locked tool should raise RuntimeError")
 
 
+def test_refresh_tool_catalog_writes_generated_cache(monkeypatch, tmp_path):
+    catalog = importlib.import_module("WNG.catalog")
+    toolbox = importlib.import_module("WNG.toolbox")
+    cache_path = tmp_path / "catalog_cache.json"
+    monkeypatch.setenv("WBW_ARCGIS_CATALOG_CACHE", str(cache_path))
+    catalog.clear_catalog_cache_memory()
+    monkeypatch.setattr(toolbox, "arcpy", _Arcpy())
+    monkeypatch.setattr(
+        toolbox,
+        "runtime_catalog",
+        lambda include_pro, tier: [
+            {
+                "id": "licensed_tool",
+                "display_name": "Licensed Tool",
+                "summary": "",
+                "category": "Other",
+                "license_tier": "pro",
+                "locked": False,
+                "available": True,
+                "params": [],
+            }
+        ],
+    )
+    messages = _Messages()
+
+    toolbox.RefreshToolCatalog().execute([], messages)
+
+    assert cache_path.exists()
+    cached_ids = [item["id"] for item in catalog.load_catalog_cache()]
+    assert cached_ids == ["licensed_tool"]
+    assert any("Wrote catalog cache" in text for text in messages.text)
+
+
+def test_variadic_snapshot_params_are_hidden(monkeypatch):
+    toolbox = importlib.import_module("WNG.toolbox")
+    monkeypatch.setattr(toolbox, "arcpy", _Arcpy())
+    tb = toolbox.Toolbox()
+    tool_cls = next(
+        cls
+        for cls in tb.tools
+        if getattr(cls, "_manifest", {}).get("id")
+        == "precision_irrigation_optimization"
+    )
+    tool = tool_cls()
+    assert tool.label == "[Locked] Precision Irrigation Optimization"
+    assert tool.getParameterInfo() == []
+    assert all(
+        not str(param.get("name", "")).startswith("*")
+        for param in tool_cls._manifest.get("params", [])
+    )
+
+
 def test_runtime_python_candidates_skip_arcgispro_exe(monkeypatch, tmp_path):
     runtime = importlib.import_module("WNG.runtime")
     arcgispro = tmp_path / "ArcGISPro.exe"
@@ -166,6 +290,143 @@ def test_external_runtime_invocation_uses_utf8(monkeypatch):
     assert captured["env"]["PYTHONIOENCODING"] == "utf-8"
     assert captured["env"]["PYTHONUTF8"] == "1"
     assert "PYTHONHOME" not in captured["env"]
+
+
+def test_runtime_session_uses_floating_license_env(monkeypatch):
+    runtime = importlib.import_module("WNG.runtime")
+    calls = {}
+
+    class _RuntimeSession:
+        @staticmethod
+        def from_floating_license_id(floating_license_id, **kwargs):
+            calls["floating_license_id"] = floating_license_id
+            calls.update(kwargs)
+            return "floating-session"
+
+    class _Wbw:
+        RuntimeSession = _RuntimeSession
+
+    monkeypatch.setenv("WBW_ARCGIS_FLOATING_LICENSE_ID", "fl_12345")
+    monkeypatch.setenv("WBW_LICENSE_PROVIDER_URL", "https://license.example.com")
+    monkeypatch.setenv("WBW_ARCGIS_MACHINE_ID", "machine-01")
+    monkeypatch.setenv("WBW_ARCGIS_CUSTOMER_ID", "customer-abc")
+    session = runtime._create_runtime_session_from_env(
+        _Wbw, include_pro=False, tier="open"
+    )
+    assert session == "floating-session"
+    assert calls == {
+        "floating_license_id": "fl_12345",
+        "include_pro": True,
+        "fallback_tier": "open",
+        "provider_url": "https://license.example.com",
+        "machine_id": "machine-01",
+        "customer_id": "customer-abc",
+    }
+
+
+def test_runtime_session_uses_signed_entitlement_file_env(monkeypatch, tmp_path):
+    runtime = importlib.import_module("WNG.runtime")
+    entitlement = tmp_path / "signed_entitlement.json"
+    entitlement.write_text('{"license":"signed"}')
+    calls = {}
+
+    class _RuntimeSession:
+        @staticmethod
+        def from_signed_entitlement_json(signed_entitlement_json, **kwargs):
+            calls["signed_entitlement_json"] = signed_entitlement_json
+            calls.update(kwargs)
+            return "signed-session"
+
+    class _Wbw:
+        RuntimeSession = _RuntimeSession
+
+    monkeypatch.setenv("WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE", str(entitlement))
+    monkeypatch.setenv("WBW_ARCGIS_PUBLIC_KEY_KID", "k1")
+    monkeypatch.setenv("WBW_ARCGIS_PUBLIC_KEY_B64URL", "public-key")
+    monkeypatch.setenv("WBW_ARCGIS_FALLBACK_TIER", "open")
+    session = runtime._create_runtime_session_from_env(
+        _Wbw, include_pro=False, tier="open"
+    )
+    assert session == "signed-session"
+    assert calls == {
+        "signed_entitlement_json": '{"license":"signed"}',
+        "public_key_kid": "k1",
+        "public_key_b64url": "public-key",
+        "include_pro": True,
+        "fallback_tier": "open",
+    }
+
+
+def test_floating_license_mode_without_id_raises(monkeypatch):
+    runtime = importlib.import_module("WNG.runtime")
+
+    class _Wbw:
+        class RuntimeSession:
+            pass
+
+    monkeypatch.setenv("WBW_ARCGIS_LICENSE_MODE", "floating")
+    monkeypatch.delenv("WBW_ARCGIS_FLOATING_LICENSE_ID", raising=False)
+    monkeypatch.delenv("WBW_FLOATING_LICENSE_ID", raising=False)
+    try:
+        runtime._create_runtime_session_from_env(_Wbw, include_pro=True, tier="pro")
+    except runtime.RuntimeBootstrapError as exc:
+        assert "WBW_ARCGIS_FLOATING_LICENSE_ID" in str(exc)
+    else:
+        raise AssertionError("floating mode without license ID should raise")
+
+
+def test_signed_file_mode_without_path_raises(monkeypatch):
+    runtime = importlib.import_module("WNG.runtime")
+
+    class _Wbw:
+        class RuntimeSession:
+            pass
+
+    monkeypatch.setenv("WBW_ARCGIS_LICENSE_MODE", "signed_file")
+    monkeypatch.delenv("WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE", raising=False)
+    monkeypatch.delenv("WBW_SIGNED_ENTITLEMENT_FILE", raising=False)
+    try:
+        runtime._create_runtime_session_from_env(_Wbw, include_pro=True, tier="pro")
+    except runtime.RuntimeBootstrapError as exc:
+        assert "WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE" in str(exc)
+    else:
+        raise AssertionError("signed_file mode without path should raise")
+
+
+def test_signed_file_mode_with_missing_file_raises(monkeypatch, tmp_path):
+    runtime = importlib.import_module("WNG.runtime")
+
+    class _Wbw:
+        class RuntimeSession:
+            pass
+
+    missing = tmp_path / "does_not_exist.json"
+    monkeypatch.setenv("WBW_ARCGIS_LICENSE_MODE", "signed_file")
+    monkeypatch.setenv("WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE", str(missing))
+    try:
+        runtime._create_runtime_session_from_env(_Wbw, include_pro=True, tier="pro")
+    except runtime.RuntimeBootstrapError as exc:
+        assert "does not exist" in str(exc)
+    else:
+        raise AssertionError("signed_file mode with missing file should raise")
+
+
+def test_signed_json_mode_without_payload_raises(monkeypatch):
+    runtime = importlib.import_module("WNG.runtime")
+
+    class _Wbw:
+        class RuntimeSession:
+            pass
+
+    monkeypatch.setenv("WBW_ARCGIS_LICENSE_MODE", "signed_json")
+    monkeypatch.delenv("WBW_ARCGIS_SIGNED_ENTITLEMENT_JSON", raising=False)
+    monkeypatch.delenv("WBW_SIGNED_ENTITLEMENT_JSON", raising=False)
+    try:
+        runtime._create_runtime_session_from_env(_Wbw, include_pro=True, tier="pro")
+    except runtime.RuntimeBootstrapError as exc:
+        assert "WBW_ARCGIS_SIGNED_ENTITLEMENT_JSON" in str(exc)
+    else:
+        raise AssertionError("signed_json mode without JSON should raise")
 
 
 def test_output_paths_are_set_for_arcgis_autoload(monkeypatch, tmp_path):

@@ -37,7 +37,16 @@ The main toolbox is `WhiteboxNextGen.pyt`.
 
    ![](https://github.com/user-attachments/assets/b19cb54f-7301-4525-ac08-3f9af042ee21)
 
-4. Run tools.
+4. Run `Refresh Tool Catalog`.
+
+   Run **Refresh Tool Catalog** after installing packages, after changing
+   license environment variables, or after upgrading `whitebox-workflows`. This
+   generates a local ArcGIS toolbox catalog from the active runtime. With a
+   valid Pro license, this step generates the ArcGIS tool entries and parameter
+   forms for Pro tools. Refresh the toolbox in the Catalog pane or restart
+   ArcGIS Pro after the tool completes.
+
+5. Run tools.
 
    Choose any tool from the toolbox categories, set input datasets and output
    file paths, then run the tool. Outputs should be saved as files in the
@@ -60,6 +69,44 @@ Useful environment variables:
 - `WBW_ARCGIS_RUNTIME_MODE`: `auto`, `external`, or `arcgis`; default `auto`.
 - `WBW_ARCGIS_INCLUDE_PRO`: whether to request Pro catalog visibility; default `true`.
 - `WBW_ARCGIS_TIER`: requested tier; default `open`.
+
+### Pro License Configuration
+
+Pro tools require a Whitebox Workflows build with Pro support and a valid Pro
+license. Set these variables in the environment used to launch ArcGIS Pro, then
+restart ArcGIS Pro, run `Runtime Diagnostics`, and run `Refresh Tool Catalog`.
+
+Common Pro settings:
+
+- `WBW_ARCGIS_TIER`: set to `pro`.
+- `WBW_ARCGIS_INCLUDE_PRO`: set to `true`.
+- `WBW_ARCGIS_FALLBACK_TIER`: fallback tier if license activation fails; default `open`.
+
+Floating license:
+
+- `WBW_ARCGIS_LICENSE_MODE`: set to `floating`.
+- `WBW_ARCGIS_FLOATING_LICENSE_ID`: floating license ID, for example `fl_12345`.
+- `WBW_ARCGIS_LICENSE_PROVIDER_URL` (or `WBW_LICENSE_PROVIDER_URL`): license provider URL.
+- `WBW_ARCGIS_MACHINE_ID`: optional machine identifier.
+- `WBW_ARCGIS_CUSTOMER_ID`: optional customer identifier.
+
+Signed entitlement from a file:
+
+- `WBW_ARCGIS_LICENSE_MODE`: set to `signed_file`.
+- `WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE`: path to signed entitlement JSON.
+- `WBW_ARCGIS_PUBLIC_KEY_KID`: public key ID.
+- `WBW_ARCGIS_PUBLIC_KEY_B64URL`: provider public key.
+
+Signed entitlement from an environment variable:
+
+- `WBW_ARCGIS_LICENSE_MODE`: set to `signed_json`.
+- `WBW_ARCGIS_SIGNED_ENTITLEMENT_JSON`: signed entitlement JSON string.
+- `WBW_ARCGIS_PUBLIC_KEY_KID`: public key ID.
+- `WBW_ARCGIS_PUBLIC_KEY_B64URL`: provider public key.
+
+The licensing modes mirror the upstream Whitebox Workflows Python startup
+patterns documented in the
+[Whitebox Workflows README](https://github.com/jblindsay/whitebox_next_gen/blob/main/crates/wbw_python/README.md#licensing-and-pro-workflows).
 
 ## Development
 
