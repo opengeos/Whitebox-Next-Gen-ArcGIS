@@ -159,7 +159,9 @@ class InstallRequiredPackages(object):
             parameterType="Required",
             direction="Input",
         )
-        python.value = r"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3"
+        python.value = (
+            r"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3\python.exe"
+        )
 
         packages = arcpy.Parameter(
             displayName="Package spec",

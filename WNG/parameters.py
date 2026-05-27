@@ -11,7 +11,7 @@ VECTOR_EXTS = (".shp", ".gpkg", ".geojson", ".json", ".fgb", ".sqlite", ".gml", 
 LIDAR_EXTS = (".las", ".laz", ".zlidar", ".copc", ".e57", ".ply")
 OUTPUT_CONTROL_SUFFIXES = ("_format", "_mode", "_type", "_units")
 FILTER_SUFFIX_PATTERN = re.compile(r";\*\.[A-Za-z0-9_]+(?:;\*\.[A-Za-z0-9_]+)*$")
-GEODATABASE_PATTERN = re.compile(r"(?i)(?:^|[\\/])[^\\/]+[.]gdb(?:[\\/]|$)")
+GEODATABASE_PATTERN = re.compile(r"(?i)(?:^|[\\/])[^\\/]+[.](?:gdb|mdb)(?:[\\/]|$)")
 
 
 def _return_type_text(manifest_or_return_type: Any) -> str:
