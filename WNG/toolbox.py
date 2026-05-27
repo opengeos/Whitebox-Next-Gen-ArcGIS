@@ -416,9 +416,22 @@ class LicenseInstructions(object):
         )
         _messages_add(
             messages,
-            "To unlock them, set WBW_ARCGIS_TIER=pro and "
-            "WBW_ARCGIS_INCLUDE_PRO=true in the environment used to launch ArcGIS Pro, "
-            "then restart ArcGIS Pro and refresh the toolbox.",
+            "To unlock them, set WBW_ARCGIS_TIER=pro, "
+            "WBW_ARCGIS_INCLUDE_PRO=true, and configure either a floating license "
+            "or signed entitlement in the environment used to launch ArcGIS Pro. "
+            "Then restart ArcGIS Pro and refresh the toolbox.",
+        )
+        _messages_add(
+            messages,
+            "Floating license variables: WBW_ARCGIS_FLOATING_LICENSE_ID, "
+            "WBW_LICENSE_PROVIDER_URL, WBW_ARCGIS_MACHINE_ID, "
+            "WBW_ARCGIS_CUSTOMER_ID.",
+        )
+        _messages_add(
+            messages,
+            "Signed entitlement variables: WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE "
+            "or WBW_ARCGIS_SIGNED_ENTITLEMENT_JSON, WBW_ARCGIS_PUBLIC_KEY_KID, "
+            "WBW_ARCGIS_PUBLIC_KEY_B64URL.",
         )
         _messages_add(
             messages,
@@ -432,7 +445,8 @@ def _locked_tool_message(manifest: dict[str, Any]) -> str:
     return (
         f"{tool_id} is locked for the active Whitebox Workflows runtime tier "
         f"({reason}). Set WBW_ARCGIS_TIER=pro and WBW_ARCGIS_INCLUDE_PRO=true "
-        "before launching ArcGIS Pro, then restart ArcGIS Pro and refresh the toolbox. "
+        "before launching ArcGIS Pro, then configure a floating license or signed "
+        "entitlement, restart ArcGIS Pro, and refresh the toolbox. "
         "Run License Instructions for details."
     )
 

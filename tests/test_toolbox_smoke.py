@@ -168,6 +168,71 @@ def test_external_runtime_invocation_uses_utf8(monkeypatch):
     assert "PYTHONHOME" not in captured["env"]
 
 
+def test_runtime_session_uses_floating_license_env(monkeypatch):
+    runtime = importlib.import_module("WNG.runtime")
+    calls = {}
+
+    class _RuntimeSession:
+        @staticmethod
+        def from_floating_license_id(floating_license_id, **kwargs):
+            calls["floating_license_id"] = floating_license_id
+            calls.update(kwargs)
+            return "floating-session"
+
+    class _Wbw:
+        RuntimeSession = _RuntimeSession
+
+    monkeypatch.setenv("WBW_ARCGIS_FLOATING_LICENSE_ID", "fl_12345")
+    monkeypatch.setenv("WBW_LICENSE_PROVIDER_URL", "https://license.example.com")
+    monkeypatch.setenv("WBW_ARCGIS_MACHINE_ID", "machine-01")
+    monkeypatch.setenv("WBW_ARCGIS_CUSTOMER_ID", "customer-abc")
+    session = runtime._create_runtime_session_from_env(
+        _Wbw, include_pro=False, tier="open"
+    )
+    assert session == "floating-session"
+    assert calls == {
+        "floating_license_id": "fl_12345",
+        "include_pro": True,
+        "fallback_tier": "open",
+        "provider_url": "https://license.example.com",
+        "machine_id": "machine-01",
+        "customer_id": "customer-abc",
+    }
+
+
+def test_runtime_session_uses_signed_entitlement_file_env(monkeypatch, tmp_path):
+    runtime = importlib.import_module("WNG.runtime")
+    entitlement = tmp_path / "signed_entitlement.json"
+    entitlement.write_text('{"license":"signed"}')
+    calls = {}
+
+    class _RuntimeSession:
+        @staticmethod
+        def from_signed_entitlement_json(signed_entitlement_json, **kwargs):
+            calls["signed_entitlement_json"] = signed_entitlement_json
+            calls.update(kwargs)
+            return "signed-session"
+
+    class _Wbw:
+        RuntimeSession = _RuntimeSession
+
+    monkeypatch.setenv("WBW_ARCGIS_SIGNED_ENTITLEMENT_FILE", str(entitlement))
+    monkeypatch.setenv("WBW_ARCGIS_PUBLIC_KEY_KID", "k1")
+    monkeypatch.setenv("WBW_ARCGIS_PUBLIC_KEY_B64URL", "public-key")
+    monkeypatch.setenv("WBW_ARCGIS_FALLBACK_TIER", "open")
+    session = runtime._create_runtime_session_from_env(
+        _Wbw, include_pro=False, tier="open"
+    )
+    assert session == "signed-session"
+    assert calls == {
+        "signed_entitlement_json": '{"license":"signed"}',
+        "public_key_kid": "k1",
+        "public_key_b64url": "public-key",
+        "include_pro": True,
+        "fallback_tier": "open",
+    }
+
+
 def test_output_paths_are_set_for_arcgis_autoload(monkeypatch, tmp_path):
     toolbox = importlib.import_module("WNG.toolbox")
     set_parameters = {}
