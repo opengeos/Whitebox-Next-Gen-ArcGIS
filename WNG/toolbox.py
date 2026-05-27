@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover - allows local smoke tests without ArcGIS
     arcpy = None
 
 from . import __version__
-from .catalog import default_catalog, humanize_tool_id, toolbox_category
+from .catalog import default_catalog, humanize_tool_id, snapshot_catalog, toolbox_category
 from .parameters import (
     create_parameter,
     ensure_output_file_path,
@@ -618,7 +618,7 @@ def _build_tools():
         RunToolJson,
     ]
     seen: set[str] = set()
-    for manifest in default_catalog():
+    for manifest in snapshot_catalog():
         tool_id = str(manifest.get("id", "")).strip()
         if not tool_id or tool_id in seen:
             continue

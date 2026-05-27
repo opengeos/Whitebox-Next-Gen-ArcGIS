@@ -61,6 +61,18 @@ def test_toolbox_loads_with_arcpy_stub(monkeypatch):
     assert toolbox.InstallRequiredPackages in tb.tools
 
 
+def test_toolbox_load_does_not_touch_runtime(monkeypatch):
+    toolbox = importlib.import_module("WNG.toolbox")
+
+    def fail_live_catalog(*args, **kwargs):
+        raise AssertionError("toolbox discovery must not use the live catalog")
+
+    monkeypatch.setattr(toolbox, "default_catalog", fail_live_catalog)
+    monkeypatch.setattr(toolbox, "arcpy", _Arcpy())
+    tb = toolbox.Toolbox()
+    assert len(tb.tools) > 10
+
+
 def test_install_required_packages_defaults(monkeypatch):
     toolbox = importlib.import_module("WNG.toolbox")
     monkeypatch.setattr(toolbox, "arcpy", _Arcpy())

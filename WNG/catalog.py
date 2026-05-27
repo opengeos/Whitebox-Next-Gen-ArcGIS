@@ -161,6 +161,15 @@ def discover_catalog(
     return [_normalize_runtime_item(item) for item in load_catalog_snapshot()]
 
 
+def snapshot_catalog() -> list[dict[str, Any]]:
+    """Return the bundled snapshot catalog without touching the live runtime.
+
+    Returns:
+        Normalized catalog records from the bundled snapshot.
+    """
+    return [_normalize_runtime_item(item) for item in load_catalog_snapshot()]
+
+
 def default_catalog() -> list[dict[str, Any]]:
     include_pro = os.environ.get("WBW_ARCGIS_INCLUDE_PRO", "true").strip().lower()
     tier = os.environ.get("WBW_ARCGIS_TIER", "open").strip() or "open"
