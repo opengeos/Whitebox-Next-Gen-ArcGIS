@@ -138,6 +138,25 @@ def test_locked_tools_include_unlock_instructions(monkeypatch):
         raise AssertionError("locked tool should raise RuntimeError")
 
 
+def test_variadic_snapshot_params_are_hidden(monkeypatch):
+    toolbox = importlib.import_module("WNG.toolbox")
+    monkeypatch.setattr(toolbox, "arcpy", _Arcpy())
+    tb = toolbox.Toolbox()
+    tool_cls = next(
+        cls
+        for cls in tb.tools
+        if getattr(cls, "_manifest", {}).get("id")
+        == "precision_irrigation_optimization"
+    )
+    tool = tool_cls()
+    assert tool.label == "[Locked] Precision Irrigation Optimization"
+    assert tool.getParameterInfo() == []
+    assert all(
+        not str(param.get("name", "")).startswith("*")
+        for param in tool_cls._manifest.get("params", [])
+    )
+
+
 def test_runtime_python_candidates_skip_arcgispro_exe(monkeypatch, tmp_path):
     runtime = importlib.import_module("WNG.runtime")
     arcgispro = tmp_path / "ArcGISPro.exe"

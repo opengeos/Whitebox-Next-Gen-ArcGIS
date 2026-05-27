@@ -63,6 +63,21 @@ def humanize_tool_id(tool_id: str) -> str:
     return " ".join(part.capitalize() for part in text.split()) or "Tool"
 
 
+def _is_variadic_param(param: dict[str, Any]) -> bool:
+    name = str(param.get("name", "")).strip()
+    return name in {"args", "kwargs", "*args", "**kwargs"} or name.startswith("*")
+
+
+def _clean_params(params: Any) -> list[dict[str, Any]]:
+    if not isinstance(params, list):
+        return []
+    return [
+        param
+        for param in params
+        if isinstance(param, dict) and not _is_variadic_param(param)
+    ]
+
+
 @lru_cache(maxsize=1)
 def load_catalog_snapshot() -> list[dict[str, Any]]:
     if not CATALOG_SNAPSHOT.exists():
@@ -86,7 +101,7 @@ def _normalize_runtime_item(item: dict[str, Any]) -> dict[str, Any]:
     fixed["locked"] = bool(
         fixed.get("locked", False) or not fixed.get("available", True)
     )
-    fixed.setdefault("params", [])
+    fixed["params"] = _clean_params(fixed.get("params", []))
     fixed.setdefault("defaults", {})
     return fixed
 
@@ -124,6 +139,8 @@ def _merge_snapshot_hints(catalog: list[dict[str, Any]]) -> list[dict[str, Any]]
         for param in fixed.get("params", []):
             if not isinstance(param, dict):
                 continue
+            if _is_variadic_param(param):
+                continue
             merged = dict(param)
             hint = snap_params.get(str(merged.get("name", "")))
             if hint:
@@ -132,7 +149,7 @@ def _merge_snapshot_hints(catalog: list[dict[str, Any]]) -> list[dict[str, Any]]
                         merged[key] = hint.get(key)
             merged_params.append(merged)
         if not merged_params:
-            merged_params = list(snap.get("params", []))
+            merged_params = _clean_params(snap.get("params", []))
         fixed["params"] = merged_params
         out.append(fixed)
     return out
