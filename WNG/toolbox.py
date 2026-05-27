@@ -15,8 +15,13 @@ except Exception:  # pragma: no cover - allows local smoke tests without ArcGIS
     arcpy = None
 
 from . import __version__
-from .catalog import default_catalog, humanize_tool_id
-from .parameters import create_parameter, parameter_value
+from .catalog import default_catalog, humanize_tool_id, toolbox_category
+from .parameters import (
+    create_parameter,
+    ensure_output_file_path,
+    parameter_value,
+    resolve_parameter_kind,
+)
 from .runtime import (
     RuntimeBootstrapError,
     create_runtime_session,
@@ -154,6 +159,7 @@ class InstallRequiredPackages(object):
             parameterType="Required",
             direction="Input",
         )
+        python.value = r"C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3"
 
         packages = arcpy.Parameter(
             displayName="Package spec",
@@ -384,6 +390,83 @@ class ToolHelp(object):
             pass
 
 
+class LicenseInstructions(object):
+    label = "License Instructions"
+    description = "Explains how to unlock Whitebox Workflows Pro tools."
+    category = "Whitebox Next Gen"
+
+    def getParameterInfo(self):
+        return []
+
+    def isLicensed(self):
+        return True
+
+    def updateParameters(self, parameters):
+        return
+
+    def updateMessages(self, parameters):
+        return
+
+    def execute(self, parameters, messages):
+        _messages_add(
+            messages,
+            "Tools labeled [Locked] require a Whitebox Workflows Pro license.",
+        )
+        _messages_add(
+            messages,
+            "To unlock them, set WBW_ARCGIS_TIER=pro and "
+            "WBW_ARCGIS_INCLUDE_PRO=true in the environment used to launch ArcGIS Pro, "
+            "then restart ArcGIS Pro and refresh the toolbox.",
+        )
+        _messages_add(
+            messages,
+            "Run Runtime Diagnostics afterward and confirm effective_tier is pro.",
+        )
+
+
+def _locked_tool_message(manifest: dict[str, Any]) -> str:
+    tool_id = str(manifest.get("id") or "this tool")
+    reason = str(manifest.get("locked_reason") or "license_tier_insufficient")
+    return (
+        f"{tool_id} is locked for the active Whitebox Workflows runtime tier "
+        f"({reason}). Set WBW_ARCGIS_TIER=pro and WBW_ARCGIS_INCLUDE_PRO=true "
+        "before launching ArcGIS Pro, then restart ArcGIS Pro and refresh the toolbox. "
+        "Run License Instructions for details."
+    )
+
+
+def _iter_output_parameter_paths(
+    parameters: list[Any], specs: list[dict[str, Any]], kinds: list[str]
+):
+    for index, spec in enumerate(specs):
+        if index >= len(parameters) or index >= len(kinds):
+            continue
+        if not kinds[index].endswith("_out"):
+            continue
+        value = _text_value(parameters[index]).strip()
+        if value:
+            yield index, str(spec.get("name") or f"output_{index}"), value
+
+
+def _iter_response_output_paths(outputs: Any):
+    if not isinstance(outputs, dict):
+        return
+    for key, value in outputs.items():
+        if isinstance(value, dict):
+            value = value.get("path")
+        if isinstance(value, str) and value.strip():
+            yield str(key), value.strip()
+
+
+def _set_output_parameter(index: int, value: str) -> None:
+    if arcpy is None:
+        return
+    try:
+        arcpy.SetParameterAsText(index, value)
+    except Exception:
+        pass
+
+
 class _CatalogTool(object):
     _manifest: dict[str, Any] = {}
 
@@ -395,7 +478,10 @@ class _CatalogTool(object):
         if self._manifest.get("locked"):
             self.label = "[Locked] " + self.label
         self.description = self._manifest.get("summary", "")
-        self.category = self._manifest.get("category", "General")
+        if self._manifest.get("locked"):
+            detail = _locked_tool_message(self._manifest)
+            self.description = f"{self.description}\n\n{detail}".strip()
+        self.category = toolbox_category(self._manifest)
 
     def isLicensed(self):
         return True
@@ -410,6 +496,32 @@ class _CatalogTool(object):
         return params
 
     def updateParameters(self, parameters):
+        specs = list(self._manifest.get("params", []))
+        if len(self._kinds) != len(specs):
+            self._kinds = [
+                resolve_parameter_kind(spec, self._manifest) for spec in specs
+            ]
+        tool_id = str(self._manifest.get("id") or "whitebox_output")
+        for index, spec in enumerate(specs):
+            if index >= len(parameters) or index >= len(self._kinds):
+                continue
+            kind = self._kinds[index]
+            if not kind.endswith("_out"):
+                continue
+            current = _text_value(parameters[index]).strip()
+            value = ensure_output_file_path(
+                arcpy,
+                current,
+                kind,
+                tool_id,
+                str(spec.get("name") or f"output_{index}"),
+            )
+            if value != current:
+                parameters[index].value = value
+                try:
+                    parameters[index].valueAsText = value
+                except Exception:
+                    pass
         return
 
     def updateMessages(self, parameters):
@@ -417,9 +529,7 @@ class _CatalogTool(object):
 
     def execute(self, parameters, messages):
         if self._manifest.get("locked"):
-            raise RuntimeError(
-                f"This tool is locked for the active runtime tier: {self._manifest.get('locked_reason', 'license_tier_insufficient')}"
-            )
+            raise RuntimeError(_locked_tool_message(self._manifest))
 
         if not self._kinds:
             self.getParameterInfo()
@@ -427,6 +537,7 @@ class _CatalogTool(object):
         temp_paths: list[str] = []
         try:
             args: dict[str, Any] = {}
+            output_parameter_values: dict[int, str] = {}
             specs = list(self._manifest.get("params", []))
             for index, spec in enumerate(specs):
                 kind = self._kinds[index]
@@ -436,6 +547,8 @@ class _CatalogTool(object):
                 )
                 if value is not None and value != "":
                     args[str(spec.get("name"))] = value
+                    if kind.endswith("_out"):
+                        output_parameter_values[index] = str(value)
 
             tier = str(self._manifest.get("license_tier", "open")).lower()
             include_pro = tier in {"pro", "enterprise"}
@@ -456,6 +569,8 @@ class _CatalogTool(object):
             outputs = (
                 response.get("outputs", response) if isinstance(response, dict) else {}
             )
+            for index, value in output_parameter_values.items():
+                _set_output_parameter(index, value)
             if isinstance(outputs, dict):
                 for key, value in outputs.items():
                     if isinstance(value, dict):
@@ -483,6 +598,7 @@ def _build_tools():
         InstallRequiredPackages,
         SearchTools,
         ToolHelp,
+        LicenseInstructions,
         RunToolJson,
     ]
     seen: set[str] = set()

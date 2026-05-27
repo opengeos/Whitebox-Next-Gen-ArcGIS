@@ -17,7 +17,21 @@ class RuntimeBootstrapError(RuntimeError):
 def _clean_env() -> dict[str, str]:
     env = dict(os.environ)
     env.pop("PYTHONHOME", None)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     return env
+
+
+def _subprocess_startup_kwargs() -> dict[str, Any]:
+    """Return subprocess options that keep external runtime windows hidden.
+
+    Returns:
+        Platform-specific keyword arguments for ``subprocess.run`` and
+        ``subprocess.Popen``.
+    """
+    if os.name != "nt":
+        return {}
+    return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
 
 
 def _candidate_pythons() -> list[str]:
@@ -31,10 +45,11 @@ def _candidate_pythons() -> list[str]:
         if p in seen:
             return
         name = Path(p).name.lower()
-        is_python = (
-            name.startswith("python")
-            or name in {"propy", "propy.bat", "propy.exe"}
-        )
+        is_python = name.startswith("python") or name in {
+            "propy",
+            "propy.bat",
+            "propy.exe",
+        }
         if os.path.isfile(p) and os.access(p, os.X_OK) and is_python:
             seen.add(p)
             out.append(p)
@@ -66,6 +81,10 @@ class ExternalRuntimeSession:
         payload.update(kwargs)
         runner = (
             "import json, sys\n"
+            "try:\n"
+            "    sys.stdout.reconfigure(encoding='utf-8')\n"
+            "except Exception:\n"
+            "    pass\n"
             "import whitebox_workflows as wbw\n"
             "p=json.loads(sys.argv[1])\n"
             "include_pro=bool(p.get('include_pro', True))\n"
@@ -91,7 +110,10 @@ class ExternalRuntimeSession:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=_clean_env(),
+            **_subprocess_startup_kwargs(),
         )
         if completed.returncode != 0:
             detail = (
@@ -125,6 +147,10 @@ class ExternalRuntimeSession:
         }
         runner = (
             "import base64, json, sys, traceback\n"
+            "try:\n"
+            "    sys.stdout.reconfigure(encoding='utf-8')\n"
+            "except Exception:\n"
+            "    pass\n"
             "import whitebox_workflows as wbw\n"
             "p=json.loads(sys.argv[1])\n"
             "def emit(evt):\n"
@@ -155,8 +181,11 @@ class ExternalRuntimeSession:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=_clean_env(),
             bufsize=1,
+            **_subprocess_startup_kwargs(),
         )
         assert process.stdout is not None
         for line in process.stdout:

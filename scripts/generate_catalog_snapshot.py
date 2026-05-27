@@ -9,7 +9,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT = ROOT / "WNG" / "data" / "catalog_snapshot.json"
 
@@ -46,8 +45,9 @@ def _resolve_next_gen(arg: str | None) -> Path:
 
     tried = "\n  ".join(str(c) for c in candidates)
     raise SystemExit(
-        "Could not locate the whitebox_next_gen checkout. Tried:\n  " + tried +
-        "\nPass --next-gen <path> or set WBW_NEXT_GEN."
+        "Could not locate the whitebox_next_gen checkout. Tried:\n  "
+        + tried
+        + "\nPass --next-gen <path> or set WBW_NEXT_GEN."
     )
 
 
@@ -178,14 +178,26 @@ def infer_kind(
     t = type_text.lower()
     r = return_type.lower()
     tid = tool_id.lower()
-    if n in {"output", "out", "output_path", "destination"} or n.startswith(
-        ("output_", "out_")
-    ):
-        text = n + " " + t + " " + r + " " + tid
-        if any(
-            tok in text
-            for tok in ("vector", "feature", "shp", "polygon", "line", "point")
-        ):
+    if is_output_path_parameter(n, t):
+        text = n + " " + t + " " + r
+        if any(tok in text for tok in ("html", "report", "csv", "json", "txt", "xml")):
+            return "file_out"
+        has_raster = "raster" in r
+        has_vector = "vector" in r
+        has_lidar = "lidar" in r
+        if has_vector and not has_raster and not has_lidar:
+            return "vector_out"
+        if has_lidar and not has_raster and not has_vector:
+            return "lidar_out"
+        if has_raster:
+            if has_vector and any(
+                tok in text for tok in ("vector", "feature", "polygon", "line", "point")
+            ):
+                return "vector_out"
+            if has_lidar and any(tok in text for tok in ("lidar", "las", "laz")):
+                return "lidar_out"
+            return "raster_out"
+        if any(tok in text for tok in ("vector", "feature", "shp", "polygon")):
             return "vector_out"
         if any(tok in text for tok in ("lidar", "las", "laz")):
             return "lidar_out"
@@ -257,6 +269,36 @@ def enum_options(name: str, default: Any) -> list[str]:
     if isinstance(default, str) and default in {"degrees", "radians", "percent"}:
         return ["degrees", "radians", "percent"]
     return []
+
+
+OUTPUT_CONTROL_SUFFIXES = ("_format", "_mode", "_type", "_units")
+
+
+def is_output_path_parameter(name: str, type_text: str) -> bool:
+    """Return whether a parameter represents an output dataset path.
+
+    Args:
+        name: Parameter name.
+        type_text: Parameter type annotation text.
+
+    Returns:
+        True when the parameter should be tagged as an output path.
+    """
+    n = name.lower()
+    t = type_text.lower()
+    if n in {"output", "out", "output_path", "out_path"}:
+        return True
+    if n == "destination":
+        return "str" in t or "path" in t
+    if n.endswith(("_path", "_file", "_directory", "_dir")):
+        return "str" in t or "path" in t
+    if n.startswith(("output_", "out_")):
+        if n.endswith(OUTPUT_CONTROL_SUFFIXES):
+            return False
+        if any(tok in t for tok in ("bool", "int", "float", "double", "literal")):
+            return False
+        return "str" in t or "path" in t
+    return False
 
 
 def signatures(stub_text: str) -> dict[str, dict[str, Any]]:
