@@ -301,6 +301,87 @@ def is_output_path_parameter(name: str, type_text: str) -> bool:
     return False
 
 
+def _runtime_param_kind(io_role: str, data_kind: str, schema: dict[str, Any]) -> str:
+    """Map a runtime catalog param (io_role/data_kind/schema) to the snapshot ``kind``."""
+    dk = (data_kind or "").lower()
+    io = (io_role or "").lower()
+    skind = str(schema.get("kind", "")).lower()
+    if dk in {"raster", "vector", "lidar"}:
+        return f"{dk}_{'out' if io == 'output' else 'in'}"
+    if skind == "scalar":
+        scalar = str(schema.get("scalar", "")).lower()
+        return "int" if scalar in {"integer", "int"} else "double"
+    if skind == "bool" or dk == "bool":
+        return "bool"
+    if skind == "enum":
+        return "enum"
+    if io == "output":
+        return "file_out"
+    if dk in {"file", "json", "text", "table"}:
+        return "file_in"
+    return "string"
+
+
+def _convert_runtime_param(p: dict[str, Any]) -> dict[str, Any]:
+    """Convert one runtime catalog param to the snapshot param shape."""
+    schema = p.get("schema") or {}
+    options = [
+        str(o.get("value"))
+        for o in (schema.get("options") or [])
+        if isinstance(o, dict) and o.get("value") is not None
+    ]
+    name = p.get("name", "")
+    return {
+        "name": "output" if name == "output_path" else name,
+        "description": p.get("description") or humanize(name),
+        "type": str(
+            p.get("data_kind") or schema.get("scalar") or schema.get("kind") or "Any"
+        ),
+        "required": bool(p.get("required", False)),
+        "default": schema.get("default"),
+        "options": options,
+        "kind": _runtime_param_kind(
+            p.get("io_role", ""), p.get("data_kind", ""), schema
+        ),
+    }
+
+
+def load_runtime_params() -> dict[str, list[dict[str, Any]]]:
+    """Param schemas from the installed ``whitebox_workflows`` runtime catalog.
+
+    The ``.pyi`` stub only carries ``*args, **kwargs`` for some tools, so their
+    stub-derived params come out empty. The runtime catalog
+    (``list_tool_catalog_json``) has the real schema, which we convert to the
+    snapshot param shape and key by tool id. Returns an empty mapping if the
+    package is unavailable, so the script still runs from the stub alone.
+
+    Returns:
+        Mapping of tool id to its converted parameter list.
+    """
+
+    try:
+        import whitebox_workflows as wbw
+
+        catalog = json.loads(wbw.list_tool_catalog_json())
+    except Exception as exc:  # pragma: no cover - environment dependent
+        print(f"  (runtime param backfill unavailable: {exc})")
+        return {}
+
+    out: dict[str, list[dict[str, Any]]] = {}
+    for tool in catalog:
+        tool_id = tool.get("id")
+        if not tool_id:
+            continue
+        params = [
+            _convert_runtime_param(p)
+            for p in tool.get("params", [])
+            if not str(p.get("name", "")).startswith("*")
+        ]
+        if params:
+            out[str(tool_id)] = params
+    return out
+
+
 def signatures(stub_text: str) -> dict[str, dict[str, Any]]:
     found: dict[str, list[dict[str, Any]]] = {}
     for m in re.finditer(
@@ -387,6 +468,7 @@ def main() -> None:
 
     taxonomy = json.loads(taxonomy_path.read_text(encoding="utf-8"))
     sigs = signatures(stub.read_text(encoding="utf-8"))
+    runtime_params = load_runtime_params()
 
     index: dict[str, tuple[str, str]] = {}
     ordered_tools: list[str] = []
@@ -405,6 +487,11 @@ def main() -> None:
         cat, sub = index[tool_id]
         sig = sigs.get(tool_id, {"params": [], "return_type": "Any"})
         params = list(sig["params"])
+        # The .pyi stub exposes only *args/**kwargs for some tools, leaving their
+        # params empty. Backfill those from the runtime catalog, which carries the
+        # real schema.
+        if not params and tool_id in runtime_params:
+            params = [dict(p) for p in runtime_params[tool_id]]
         ret = str(sig.get("return_type", "Any"))
         if not any(str(p.get("kind", "")).endswith("_out") for p in params):
             if "Raster" in ret:
@@ -465,7 +552,9 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
         json.dumps(
-            {"source": str(next_gen), "tool_count": len(tools), "tools": tools},
+            # Record only the checkout's directory name, never the absolute path,
+            # so the snapshot does not leak the generating machine's filesystem.
+            {"source": next_gen.name, "tool_count": len(tools), "tools": tools},
             indent=2,
         ),
         encoding="utf-8",
