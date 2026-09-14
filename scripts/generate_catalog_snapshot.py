@@ -439,7 +439,7 @@ def signatures(stub_text: str) -> dict[str, dict[str, Any]]:
             {"params": params, "return_type": ret, "score": score}
         )
     return {
-        name: sorted(candidates, key=lambda c: c["score"], reverse=True)[0]
+        name: max(candidates, key=lambda c: c["score"])
         for name, candidates in found.items()
     }
 
