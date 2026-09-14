@@ -3,7 +3,6 @@ import sys
 import tempfile
 import traceback
 
-
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
@@ -14,7 +13,7 @@ _IMPORT_LOG_PATH = os.path.join(
 )
 
 try:
-    from WNG import toolbox as _toolbox  # noqa: E402
+    from WNG import toolbox as _toolbox
 except Exception:
     _toolbox = None
     _IMPORT_ERROR = traceback.format_exc()
@@ -49,7 +48,7 @@ def _export_tool_classes(tool_classes):
     return exported
 
 
-class ImportDiagnostics(object):
+class ImportDiagnostics:
     """Report import failures that prevent full toolbox initialization."""
 
     label = "Import Diagnostics"
@@ -115,7 +114,7 @@ except Exception:
     _TOOLS = [ImportDiagnostics]
 
 
-class Toolbox(object):
+class Toolbox:
     """ArcGIS Python toolbox entry point."""
 
     def __init__(self):
