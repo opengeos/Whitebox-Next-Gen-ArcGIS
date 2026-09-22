@@ -124,3 +124,39 @@ def test_runtime_catalog_supplies_the_summaries():
     assert runtime, "runtime catalog was empty"
     described = [t for t in runtime.values() if t["summary"]]
     assert len(described) > 0.9 * len(runtime)
+
+
+def test_snapshot_summaries_match_the_runtime(snapshot):
+    """The committed summaries are the runtime's, tool for tool.
+
+    The checks above would pass on a snapshot whose summaries were hand-written,
+    or correct but attached to the wrong tools. This one will not: it compares
+    values by id, and requires that a blank summary only ever belongs to a tool
+    the runtime does not have.
+
+    It therefore also answers "is the committed snapshot stale?" — if the
+    installed runtime has moved on, the fix is to regenerate rather than to
+    loosen the assertion.
+    """
+
+    pytest.importorskip("whitebox_workflows")
+    module = _generator()
+    runtime = module.load_runtime_catalog()
+    by_id = {tool["id"]: tool for tool in snapshot["tools"]}
+
+    mismatched = [
+        tool_id
+        for tool_id in by_id.keys() & runtime.keys()
+        if by_id[tool_id]["summary"] != runtime[tool_id]["summary"]
+    ]
+    assert not mismatched, (
+        f"{len(mismatched)} summaries differ from the installed runtime "
+        f"(e.g. {mismatched[:5]}); regenerate with "
+        "`python scripts/generate_catalog_snapshot.py`"
+    )
+
+    blank = {tool_id for tool_id, tool in by_id.items() if not tool["summary"]}
+    assert not blank & runtime.keys(), (
+        f"blank summaries for tools the runtime does describe: "
+        f"{sorted(blank & runtime.keys())[:5]}"
+    )

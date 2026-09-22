@@ -428,6 +428,11 @@ def load_runtime_catalog() -> dict[str, dict[str, Any]]:
     (``list_tool_catalog_json``) has the real schema, which we convert to the
     snapshot param shape.
 
+    Both come from the *installed* ``whitebox_workflows``, which is not
+    necessarily the same build as a ``--next-gen`` checkout supplying the stub
+    and taxonomy. There is no way around that — the catalog lives inside a
+    compiled extension module — so the source is printed instead of assumed.
+
     **Summaries.** The runtime already describes every tool it knows — from a
     one-liner ("Calculates the absolute value of each raster cell.") to several
     paragraphs for the harder algorithms. Nothing else in the build has that
@@ -447,6 +452,15 @@ def load_runtime_catalog() -> dict[str, dict[str, Any]]:
         import whitebox_workflows as wbw
 
         catalog = json.loads(wbw.list_tool_catalog_json())
+        # Always the installed package, even when --next-gen selected a
+        # checkout for the stub and taxonomy: the catalog comes out of a
+        # compiled extension module, and a Next Gen checkout is Rust source
+        # with nothing importable in it. Printed so that a run mixing a local
+        # checkout with an installed runtime says so rather than looking like
+        # one source.
+        location = getattr(wbw, "__file__", None)
+        if location:
+            print(f"  runtime catalog from {Path(location).parent}")
     except Exception as exc:  # pragma: no cover - environment dependent
         print(f"  (runtime catalog unavailable: {exc})")
         print(
@@ -467,10 +481,15 @@ def load_runtime_catalog() -> dict[str, dict[str, Any]]:
         ]
         out[str(tool_id)] = {
             "params": params,
-            # Carried verbatim rather than trimmed to a first sentence: the
-            # snapshot exists so the offline path matches the live runtime, and
-            # a shorter description here would make the two disagree. Consumers
+            # Whole, rather than trimmed to a first sentence: the snapshot
+            # exists so the offline path matches the live runtime, and a
+            # shorter description here would make the two disagree. Consumers
             # that need a short form can cut one; they cannot invent one back.
+            #
+            # `.strip()` only removes surrounding whitespace, which no summary
+            # in the catalog currently has. It is here so that one which
+            # acquires a trailing newline does not become an ArcGIS Pro tool
+            # description with a blank line under it.
             "summary": str(tool.get("summary") or "").strip(),
         }
     return out
