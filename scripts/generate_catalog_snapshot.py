@@ -31,12 +31,20 @@ def _resolve_next_gen(arg: str | None) -> Path | None:
         :func:`resolve_sources`.
 
     Raises:
-        SystemExit: If ``--next-gen`` named a path that does not exist.
+        SystemExit: If ``--next-gen`` named a path that is not a directory.
     """
 
-    candidates: list[Path] = []
+    # An explicit --next-gen is authoritative: it is checked on its own and
+    # fails loudly. Letting a typo fall through to the environment variable or
+    # the sibling checkout would generate a snapshot from a source the caller
+    # did not ask for and did not know was being used.
     if arg:
-        candidates.append(Path(arg).expanduser())
+        explicit = Path(arg).expanduser()
+        if not explicit.is_dir():
+            raise SystemExit(f"--next-gen path does not exist: {arg}")
+        return explicit.resolve()
+
+    candidates: list[Path] = []
     env = os.environ.get("WBW_NEXT_GEN")
     if env:
         candidates.append(Path(env).expanduser())
@@ -45,9 +53,6 @@ def _resolve_next_gen(arg: str | None) -> Path | None:
     for candidate in candidates:
         if candidate.is_dir():
             return candidate.resolve()
-
-    if arg:
-        raise SystemExit(f"--next-gen path does not exist: {arg}")
     return None
 
 
@@ -67,7 +72,9 @@ def resolve_sources(arg: str | None) -> tuple[Path, Path, str]:
 
     Both files ship inside the published ``whitebox-workflows`` wheel as well as
     living in the Next Gen checkout, so a checkout is preferred but not
-    required. That matters because the runtime catalog — the only source of tool
+    required. A checkout named with ``--next-gen`` is authoritative, though:
+    if it cannot supply both files the script stops rather than silently
+    generating from the wheel. That matters because the runtime catalog — the only source of tool
     summaries — comes from that same installed package: without it the snapshot
     can be regenerated but every summary comes out empty, which is the state
     this script used to produce unconditionally.
@@ -91,6 +98,15 @@ def resolve_sources(arg: str | None) -> tuple[Path, Path, str]:
         taxonomy = wbw_python / "tool_taxonomy.resolved.json"
         if stub.is_file() and taxonomy.is_file():
             return stub, taxonomy, next_gen.name
+        if arg:
+            # Same reasoning as above: a checkout named on the command line is
+            # the source, so an incomplete one is an error rather than a cue to
+            # quietly generate the snapshot from the installed wheel instead.
+            raise SystemExit(
+                f"--next-gen {arg} has no "
+                "crates/wbw_python/whitebox_workflows/whitebox_workflows.pyi "
+                "and crates/wbw_python/tool_taxonomy.resolved.json"
+            )
 
     package = _installed_package_dir()
     if package is not None:

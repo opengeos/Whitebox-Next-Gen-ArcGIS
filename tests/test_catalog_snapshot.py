@@ -78,22 +78,41 @@ def test_snapshot_header_records_a_bare_source(snapshot):
     assert snapshot["tool_count"] == len(snapshot["tools"])
 
 
-def test_resolve_sources_falls_back_to_the_installed_package():
+def test_resolve_sources_falls_back_to_the_installed_package(tmp_path, monkeypatch):
     """With no checkout, the published wheel supplies the stub and taxonomy."""
 
     pytest.importorskip("whitebox_workflows")
     module = _generator()
+    # Both checkout candidates have to be absent or this exercises the wrong
+    # branch — and it would do so precisely on a Next Gen maintainer's machine,
+    # where `../whitebox_next_gen` is the normal state of the world.
+    monkeypatch.delenv("WBW_NEXT_GEN", raising=False)
+    monkeypatch.setattr(module, "ROOT", tmp_path / "repo")
+
     stub, taxonomy, source = module.resolve_sources(None)
     assert stub.is_file() and taxonomy.is_file()
     assert source == "whitebox_workflows"
 
 
-def test_resolve_sources_rejects_a_bad_explicit_path():
+def test_resolve_sources_rejects_a_bad_explicit_path(monkeypatch):
     """A ``--next-gen`` path that does not exist is an error, not a fallback."""
 
     module = _generator()
+    # Set the fallbacks up to succeed, so the test fails if the explicit path
+    # is merely tried first rather than being authoritative.
+    monkeypatch.setenv("WBW_NEXT_GEN", str(ROOT))
     with pytest.raises(SystemExit):
         module.resolve_sources("/nonexistent/whitebox_next_gen")
+
+
+def test_resolve_sources_rejects_an_incomplete_explicit_checkout(tmp_path):
+    """A named checkout missing the two files stops rather than falling back."""
+
+    module = _generator()
+    empty = tmp_path / "whitebox_next_gen"
+    empty.mkdir()
+    with pytest.raises(SystemExit):
+        module.resolve_sources(str(empty))
 
 
 def test_runtime_catalog_supplies_the_summaries():
