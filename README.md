@@ -110,11 +110,22 @@ patterns documented in the
 
 ## Development
 
-Regenerate the catalog snapshot from the local Next Gen checkout:
+Regenerate the catalog snapshot:
 
 ```bash
+pip install whitebox-workflows
 python scripts/generate_catalog_snapshot.py
 ```
+
+The published `whitebox-workflows` wheel carries everything the snapshot needs —
+the type stub, the resolved tool taxonomy, and the runtime catalog that supplies
+each tool's parameter schema and **summary** — so a Next Gen source checkout is
+optional. Pass `--next-gen <path>` (or set `WBW_NEXT_GEN`) to prefer a local
+checkout; it still needs the installed runtime for the summaries.
+
+Without the runtime installed the script still runs, but every tool's summary
+comes out empty and varargs-only tools lose their parameters. It says so on
+stdout and reports how many summaries it wrote.
 
 Run local smoke tests without ArcGIS:
 
