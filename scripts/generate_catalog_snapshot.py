@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT = ROOT / "WNG" / "data" / "catalog_snapshot.json"
 
 
-def _resolve_next_gen(arg: str | None) -> Path:
+def _resolve_next_gen(arg: str | None) -> Path | None:
     """Locate the whitebox_next_gen checkout from CLI arg, env, or sibling dir.
 
     Resolution order:
@@ -25,15 +25,26 @@ def _resolve_next_gen(arg: str | None) -> Path:
         arg: Optional path provided on the command line.
 
     Returns:
-        Absolute :class:`Path` to the Next Gen checkout.
+        Absolute :class:`Path` to the Next Gen checkout, or None when there is
+        none to find. A missing checkout is only fatal if the installed
+        ``whitebox_workflows`` package cannot stand in for it; see
+        :func:`resolve_sources`.
 
     Raises:
-        SystemExit: If no candidate path exists on disk.
+        SystemExit: If ``--next-gen`` named a path that is not a directory.
     """
 
-    candidates: list[Path] = []
+    # An explicit --next-gen is authoritative: it is checked on its own and
+    # fails loudly. Letting a typo fall through to the environment variable or
+    # the sibling checkout would generate a snapshot from a source the caller
+    # did not ask for and did not know was being used.
     if arg:
-        candidates.append(Path(arg).expanduser())
+        explicit = Path(arg).expanduser()
+        if not explicit.is_dir():
+            raise SystemExit(f"--next-gen path does not exist: {arg}")
+        return explicit.resolve()
+
+    candidates: list[Path] = []
     env = os.environ.get("WBW_NEXT_GEN")
     if env:
         candidates.append(Path(env).expanduser())
@@ -42,12 +53,73 @@ def _resolve_next_gen(arg: str | None) -> Path:
     for candidate in candidates:
         if candidate.is_dir():
             return candidate.resolve()
+    return None
 
-    tried = "\n  ".join(str(c) for c in candidates)
+
+def _installed_package_dir() -> Path | None:
+    """Directory of the installed ``whitebox_workflows`` package, if any."""
+
+    try:
+        import whitebox_workflows
+    except Exception:  # pragma: no cover - environment dependent
+        return None
+    location = getattr(whitebox_workflows, "__file__", None)
+    return Path(location).resolve().parent if location else None
+
+
+def resolve_sources(arg: str | None) -> tuple[Path, Path, str]:
+    """Locate the type stub and the resolved tool taxonomy.
+
+    Both files ship inside the published ``whitebox-workflows`` wheel as well as
+    living in the Next Gen checkout, so a checkout is preferred but not
+    required. A checkout named with ``--next-gen`` is authoritative, though:
+    if it cannot supply both files the script stops rather than silently
+    generating from the wheel. That matters because the runtime catalog — the only source of tool
+    summaries — comes from that same installed package: without it the snapshot
+    can be regenerated but every summary comes out empty, which is the state
+    this script used to produce unconditionally.
+
+    Args:
+        arg: Optional ``--next-gen`` path.
+
+    Returns:
+        ``(stub, taxonomy, source)`` where ``source`` is a bare name recorded in
+        the snapshot. Never an absolute path: the snapshot is committed, and the
+        generating machine's filesystem layout is not part of the data.
+
+    Raises:
+        SystemExit: If neither a checkout nor an installed package provides them.
+    """
+
+    next_gen = _resolve_next_gen(arg)
+    if next_gen is not None:
+        wbw_python = next_gen / "crates" / "wbw_python"
+        stub = wbw_python / "whitebox_workflows" / "whitebox_workflows.pyi"
+        taxonomy = wbw_python / "tool_taxonomy.resolved.json"
+        if stub.is_file() and taxonomy.is_file():
+            return stub, taxonomy, next_gen.name
+        if arg:
+            # Same reasoning as above: a checkout named on the command line is
+            # the source, so an incomplete one is an error rather than a cue to
+            # quietly generate the snapshot from the installed wheel instead.
+            raise SystemExit(
+                f"--next-gen {arg} has no "
+                "crates/wbw_python/whitebox_workflows/whitebox_workflows.pyi "
+                "and crates/wbw_python/tool_taxonomy.resolved.json"
+            )
+
+    package = _installed_package_dir()
+    if package is not None:
+        stub = package / "whitebox_workflows.pyi"
+        taxonomy = package / "tool_taxonomy.resolved.json"
+        if stub.is_file() and taxonomy.is_file():
+            return stub, taxonomy, "whitebox_workflows"
+
     raise SystemExit(
-        "Could not locate the whitebox_next_gen checkout. Tried:\n  "
-        + tried
-        + "\nPass --next-gen <path> or set WBW_NEXT_GEN."
+        "Could not find whitebox_workflows.pyi and tool_taxonomy.resolved.json.\n"
+        "Either pass --next-gen <path> (or set WBW_NEXT_GEN) to a "
+        "whitebox_next_gen checkout, or install the runtime:\n"
+        "  pip install whitebox-workflows"
     )
 
 
@@ -346,28 +418,58 @@ def _convert_runtime_param(p: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def load_runtime_params() -> dict[str, list[dict[str, Any]]]:
-    """Param schemas from the installed ``whitebox_workflows`` runtime catalog.
+def load_runtime_catalog() -> dict[str, dict[str, Any]]:
+    """Tool records from the installed ``whitebox_workflows`` runtime catalog.
 
-    The ``.pyi`` stub only carries ``*args, **kwargs`` for some tools, so their
-    stub-derived params come out empty. The runtime catalog
+    Two things in the snapshot can only come from here.
+
+    **Params.** The ``.pyi`` stub only carries ``*args, **kwargs`` for some
+    tools, so their stub-derived params come out empty. The runtime catalog
     (``list_tool_catalog_json``) has the real schema, which we convert to the
-    snapshot param shape and key by tool id. Returns an empty mapping if the
-    package is unavailable, so the script still runs from the stub alone.
+    snapshot param shape.
+
+    Both come from the *installed* ``whitebox_workflows``, which is not
+    necessarily the same build as a ``--next-gen`` checkout supplying the stub
+    and taxonomy. There is no way around that — the catalog lives inside a
+    compiled extension module — so the source is printed instead of assumed.
+
+    **Summaries.** The runtime already describes every tool it knows — from a
+    one-liner ("Calculates the absolute value of each raster cell.") to several
+    paragraphs for the harder algorithms. Nothing else in the build has that
+    text: the stub declares signatures and nothing more, and the taxonomy holds
+    only the category tree. Without this catalog every ``summary`` in the
+    snapshot is the empty string, which is what ``WNG/catalog.py`` then hands
+    ArcGIS Pro as a tool's description when the runtime is unavailable.
+
+    Returns an empty mapping if the package is unavailable, so the script still
+    runs from the stub alone.
 
     Returns:
-        Mapping of tool id to its converted parameter list.
+        Mapping of tool id to ``{"params": [...], "summary": str}``.
     """
 
     try:
         import whitebox_workflows as wbw
 
         catalog = json.loads(wbw.list_tool_catalog_json())
+        # Always the installed package, even when --next-gen selected a
+        # checkout for the stub and taxonomy: the catalog comes out of a
+        # compiled extension module, and a Next Gen checkout is Rust source
+        # with nothing importable in it. Printed so that a run mixing a local
+        # checkout with an installed runtime says so rather than looking like
+        # one source.
+        location = getattr(wbw, "__file__", None)
+        if location:
+            print(f"  runtime catalog from {Path(location).parent}")
     except Exception as exc:  # pragma: no cover - environment dependent
-        print(f"  (runtime param backfill unavailable: {exc})")
+        print(f"  (runtime catalog unavailable: {exc})")
+        print(
+            "  summaries and varargs params will be empty;"
+            " run `pip install whitebox-workflows` to fill them"
+        )
         return {}
 
-    out: dict[str, list[dict[str, Any]]] = {}
+    out: dict[str, dict[str, Any]] = {}
     for tool in catalog:
         tool_id = tool.get("id")
         if not tool_id:
@@ -377,8 +479,19 @@ def load_runtime_params() -> dict[str, list[dict[str, Any]]]:
             for p in tool.get("params", [])
             if not str(p.get("name", "")).startswith("*")
         ]
-        if params:
-            out[str(tool_id)] = params
+        out[str(tool_id)] = {
+            "params": params,
+            # Whole, rather than trimmed to a first sentence: the snapshot
+            # exists so the offline path matches the live runtime, and a
+            # shorter description here would make the two disagree. Consumers
+            # that need a short form can cut one; they cannot invent one back.
+            #
+            # `.strip()` only removes surrounding whitespace, which no summary
+            # in the catalog currently has. It is here so that one which
+            # acquires a trailing newline does not become an ArcGIS Pro tool
+            # description with a blank line under it.
+            "summary": str(tool.get("summary") or "").strip(),
+        }
     return out
 
 
@@ -460,15 +573,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    next_gen = _resolve_next_gen(args.next_gen)
-    wbw_python = next_gen / "crates" / "wbw_python"
-    stub = wbw_python / "whitebox_workflows" / "whitebox_workflows.pyi"
-    taxonomy_path = wbw_python / "tool_taxonomy.resolved.json"
+    stub, taxonomy_path, source = resolve_sources(args.next_gen)
     out_path = args.out
 
     taxonomy = json.loads(taxonomy_path.read_text(encoding="utf-8"))
     sigs = signatures(stub.read_text(encoding="utf-8"))
-    runtime_params = load_runtime_params()
+    runtime = load_runtime_catalog()
 
     index: dict[str, tuple[str, str]] = {}
     ordered_tools: list[str] = []
@@ -487,11 +597,13 @@ def main() -> None:
         cat, sub = index[tool_id]
         sig = sigs.get(tool_id, {"params": [], "return_type": "Any"})
         params = list(sig["params"])
+        runtime_tool = runtime.get(tool_id, {})
         # The .pyi stub exposes only *args/**kwargs for some tools, leaving their
         # params empty. Backfill those from the runtime catalog, which carries the
         # real schema.
-        if not params and tool_id in runtime_params:
-            params = [dict(p) for p in runtime_params[tool_id]]
+        runtime_tool_params = runtime_tool.get("params") or []
+        if not params and runtime_tool_params:
+            params = [dict(p) for p in runtime_tool_params]
         ret = str(sig.get("return_type", "Any"))
         if not any(str(p.get("kind", "")).endswith("_out") for p in params):
             if "Raster" in ret:
@@ -535,7 +647,7 @@ def main() -> None:
             {
                 "id": tool_id,
                 "display_name": humanize(tool_id),
-                "summary": "",
+                "summary": runtime_tool.get("summary", ""),
                 "category": display_group(cat, sub),
                 "taxonomy_category": cat,
                 "taxonomy_subcategory": sub,
@@ -552,14 +664,20 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
         json.dumps(
-            # Record only the checkout's directory name, never the absolute path,
-            # so the snapshot does not leak the generating machine's filesystem.
-            {"source": next_gen.name, "tool_count": len(tools), "tools": tools},
+            # `source` is a bare name, never an absolute path, so the committed
+            # snapshot does not leak the generating machine's filesystem.
+            {"source": source, "tool_count": len(tools), "tools": tools},
             indent=2,
         ),
         encoding="utf-8",
     )
-    print(f"Wrote {out_path} with {len(tools)} tools")
+    summarised = sum(1 for t in tools if t["summary"])
+    print(f"Wrote {out_path} with {len(tools)} tools ({summarised} with a summary)")
+    if summarised < len(tools):
+        missing = [t["id"] for t in tools if not t["summary"]]
+        # Named rather than counted: a tool the taxonomy lists and the runtime
+        # does not is worth noticing, and the list is short enough to read.
+        print(f"  no runtime entry for: {', '.join(missing)}")
 
 
 if __name__ == "__main__":
