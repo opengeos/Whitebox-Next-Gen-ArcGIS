@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -288,7 +288,7 @@ def write_catalog_cache(
     target = path or catalog_cache_path()
     target.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "metadata": metadata or {},
         "tools": [_normalize_runtime_item(item) for item in catalog],
     }
