@@ -110,14 +110,14 @@ class _StreamToArcGIS:
             _messages_add(self.messages, str(msg))
 
 
-class Toolbox(object):
+class Toolbox:
     def __init__(self):
         self.label = "Whitebox Next Gen Toolbox"
         self.alias = "WNG"
         self.tools = _build_tools()
 
 
-class RuntimeDiagnostics(object):
+class RuntimeDiagnostics:
     label = "Runtime Diagnostics"
     description = "Reports Whitebox Next Gen runtime availability and catalog status."
     category = "Whitebox Next Gen"
@@ -153,7 +153,7 @@ class RuntimeDiagnostics(object):
             _messages_add(messages, f"Snapshot catalog tools: {len(default_catalog())}")
 
 
-class InstallRequiredPackages(object):
+class InstallRequiredPackages:
     label = "Install Required Packages"
     description = "Installs Python packages required by the Whitebox Next Gen toolbox."
     category = "Whitebox Next Gen"
@@ -272,7 +272,7 @@ class InstallRequiredPackages(object):
         _messages_add(messages, "Verified import: whitebox_workflows")
 
 
-class SearchTools(object):
+class SearchTools:
     label = "Search Tools"
     description = "Searches the Whitebox Next Gen toolbox catalog."
     category = "Whitebox Next Gen"
@@ -317,7 +317,7 @@ class SearchTools(object):
         _messages_add(messages, f"{len(matches)} match(es)")
 
 
-class RefreshToolCatalog(object):
+class RefreshToolCatalog:
     label = "Refresh Tool Catalog"
     description = (
         "Generates the ArcGIS toolbox catalog from the active Whitebox Workflows "
@@ -383,7 +383,7 @@ class RefreshToolCatalog(object):
         )
 
 
-class RunToolJson(object):
+class RunToolJson:
     label = "Run Tool From JSON"
     description = "Runs a Whitebox Next Gen tool using a JSON argument payload."
     category = "Whitebox Next Gen"
@@ -428,7 +428,7 @@ class RunToolJson(object):
         _messages_add(messages, response)
 
 
-class ToolHelp(object):
+class ToolHelp:
     label = "Tool Help"
     description = "Opens local or generated help for a Whitebox Next Gen tool."
     category = "Whitebox Next Gen"
@@ -465,7 +465,7 @@ class ToolHelp(object):
             pass
 
 
-class LicenseInstructions(object):
+class LicenseInstructions:
     label = "License Instructions"
     description = "Explains how to unlock Whitebox Workflows Pro tools."
     category = "Whitebox Next Gen"
@@ -556,7 +556,7 @@ def _set_output_parameter(index: int, value: str) -> None:
         pass
 
 
-class _CatalogTool(object):
+class _CatalogTool:
     _manifest: dict[str, Any] = {}
 
     def __init__(self):
@@ -611,7 +611,6 @@ class _CatalogTool(object):
                     parameters[index].valueAsText = value
                 except Exception:
                     pass
-        return
 
     def updateMessages(self, parameters):
         return
